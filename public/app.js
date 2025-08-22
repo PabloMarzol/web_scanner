@@ -156,13 +156,26 @@ class WebsiteTester {
     updateLogs(logs) {
         const logsContainer = document.getElementById('realTimeLogs');
         
-        // Clear existing logs
-        logsContainer.innerHTML = '';
+        // Keep track of already displayed logs to avoid duplicates
+        if (!this.displayedLogs) {
+            this.displayedLogs = new Set();
+        }
         
         // Show last 20 logs
         const recentLogs = logs.slice(-20);
         
+        // Only add new logs that haven't been displayed yet
         recentLogs.forEach((log, index) => {
+            const logKey = `${log.timestamp}-${log.message}`;
+            
+            // Skip if we've already displayed this log
+            if (this.displayedLogs.has(logKey)) {
+                return;
+            }
+            
+            // Mark this log as displayed
+            this.displayedLogs.add(logKey);
+            
             const logElement = document.createElement('div');
             const timestamp = new Date(log.timestamp).toLocaleTimeString();
             
@@ -185,28 +198,56 @@ class WebsiteTester {
                     break;
             }
             
-            logElement.className = `${textColor} text-xs opacity-0 transition-all duration-300`;
+            logElement.className = `${textColor} text-xs opacity-0 transform translate-y-2 transition-all duration-500 ease-out`;
             logElement.innerHTML = `
-                <div class="flex items-start gap-2">
-                    <span class="text-gray-500 text-xs">[${timestamp}]</span>
+                <div class="flex items-start gap-2 py-1">
+                    <span class="text-gray-500 text-xs flex-shrink-0">[${timestamp}]</span>
                     <i class="${icon} text-xs mt-0.5 flex-shrink-0"></i>
-                    <span class="break-all">${log.message}</span>
+                    <span class="break-all leading-relaxed">${log.message}</span>
                 </div>
             `;
             
+            // Add the new log element
             logsContainer.appendChild(logElement);
             
-            // Animate in with delay
-            setTimeout(() => {
-                logElement.style.opacity = '1';
-            }, index * 50);
+            // Animate in the new log with a slight delay
+            requestAnimationFrame(() => {
+                setTimeout(() => {
+                    logElement.style.opacity = '1';
+                    logElement.style.transform = 'translateY(0)';
+                }, 50);
+            });
+            
+            // Remove old logs if we have too many (keep performance good)
+            const allLogs = logsContainer.children;
+            if (allLogs.length > 25) {
+                const oldLog = allLogs[0];
+                oldLog.style.opacity = '0';
+                oldLog.style.transform = 'translateY(-10px)';
+                setTimeout(() => {
+                    if (oldLog.parentNode) {
+                        logsContainer.removeChild(oldLog);
+                    }
+                }, 300);
+            }
         });
         
-        // Auto-scroll to bottom with smooth animation
-        logsContainer.scrollTo({
-            top: logsContainer.scrollHeight,
-            behavior: 'smooth'
-        });
+        // Clean up displayed logs set if it gets too large
+        if (this.displayedLogs.size > 100) {
+            this.displayedLogs = new Set(Array.from(this.displayedLogs).slice(-50));
+        }
+        
+        // Auto-scroll to bottom with smooth animation only if user hasn't scrolled up
+        const isScrolledToBottom = logsContainer.scrollTop + logsContainer.clientHeight >= logsContainer.scrollHeight - 10;
+        
+        if (isScrolledToBottom) {
+            setTimeout(() => {
+                logsContainer.scrollTo({
+                    top: logsContainer.scrollHeight,
+                    behavior: 'smooth'
+                });
+            }, 100);
+        }
     }
     
     displayResults(results) {
