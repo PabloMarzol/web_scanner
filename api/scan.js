@@ -1,4 +1,4 @@
-// api/scan.js - Your working server.js logic adapted for Vercel
+
 import puppeteer from 'puppeteer-core';
 import chromium from '@sparticuz/chromium';
 
