@@ -1,6 +1,5 @@
 // server.js
 import express from 'express';
-import { chromium } from 'playwright';
 import puppeteer from 'puppeteer';
 import cors from 'cors';
 import path from 'path';
@@ -85,19 +84,29 @@ async function scanWebsite(baseUrl, scanId) {
     addLog(`🚀 Starting scan for ${baseUrl}`, 'info');
     
     const browser = await puppeteer.launch({
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--single-process',
-        '--disable-gpu',
-        '--disable-web-security',
-        '--disable-features=VizDisplayCompositor'
-      ]
+        headless: "new", // Use new headless mode to fix the warning
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu',
+            '--disable-web-security',
+            '--disable-features=VizDisplayCompositor',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--disable-features=TranslateUI',
+            '--disable-ipc-flooding-protection',
+            '--disable-hang-monitor',
+            '--disable-client-side-phishing-detection',
+            '--disable-component-update',
+            '--disable-default-apps'
+        ],
+        ignoreDefaultArgs: ['--disable-extensions'],
+        timeout: 60000 // 60 second timeout
     });
     const visitedPages = new Set();
     const allIssues = {
@@ -130,25 +139,33 @@ async function scanWebsite(baseUrl, scanId) {
         const fullUrl = pageUrl.startsWith('http') ? pageUrl : baseUrl + pageUrl;
         addLog(`📄 Scanning: ${fullUrl}`, 'info');
         
-        // Replace Playwright context with direct page creation:
-        const page = await browser.newPage();
-        
-        const pageIssues = {
+        let page;
+        try {
+            page = await browser.newPage();
+            
+            // Set viewport and user agent
+            await page.setViewport({ width: 1920, height: 1080 });
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+            
+            const pageIssues = {
             url: fullUrl,
             errors: [],
             warnings: []
-        };
-        
-        page.on('console', (msg) => {
+            };
+            
+            page.on('console', (msg) => {
             const text = msg.text();
             if (msg.type() === 'error') {
-            pageIssues.errors.push(text);
+                pageIssues.errors.push(text);
             } else if (msg.type() === 'warning' && text.includes('Warning:')) {
-            pageIssues.warnings.push(text);
+                pageIssues.warnings.push(text);
             }
-        });
-        
-        try {
+            });
+            
+            // Set longer timeouts and better error handling
+            page.setDefaultTimeout(30000);
+            page.setDefaultNavigationTimeout(30000);
+            
             const response = await page.goto(fullUrl, { 
             timeout: 30000,
             waitUntil: 'domcontentloaded'
@@ -161,61 +178,84 @@ async function scanWebsite(baseUrl, scanId) {
                 status: response?.status() || 'No response',
                 error: 'Page failed to load'
             });
-            await page.close();
             return;
             }
             
-            // Wait for page to stabilize
-            await page.waitForNetworkIdle({ timeout: 10000 }).catch(() => {
-            addLog(`⏰ NetworkIdle timeout for ${fullUrl}, continuing...`, 'warning');
-            });
+            // Wait for page to stabilize with better error handling
+            try {
+            await page.waitForTimeout(2000); // Give page time to load
+            addLog(`  ✅ Page loaded successfully`, 'info');
+            } catch (error) {
+            addLog(`⏰ Page stabilization timeout for ${fullUrl}, continuing...`, 'warning');
+            }
             
-            // Test links - Update to use Puppeteer syntax:
-            const links = await page.evaluate((baseUrl) => {
-            const allLinks = Array.from(document.querySelectorAll('a[href]'));
-            return allLinks
+            // Test links with better error handling
+            let links = [];
+            try {
+            links = await page.evaluate((baseUrl) => {
+                const allLinks = Array.from(document.querySelectorAll('a[href]'));
+                return allLinks
                 .map(link => {
-                try {
+                    try {
                     let href = link.getAttribute('href');
                     if (!href) return null;
                     
                     if (href.startsWith('/')) {
-                    const baseUrlObj = new URL(baseUrl);
-                    href = baseUrlObj.origin + href;
+                        const baseUrlObj = new URL(baseUrl);
+                        href = baseUrlObj.origin + href;
                     } else if (!href.startsWith('http')) {
-                    href = new URL(href, baseUrl).href;
+                        href = new URL(href, baseUrl).href;
                     }
                     
                     return href;
-                } catch {
+                    } catch {
                     return null;
-                }
+                    }
                 })
                 .filter(href => {
-                if (!href || href.startsWith('#') || href.startsWith('javascript:') || 
-                    href.startsWith('mailto:') || href.startsWith('tel:')) return false;
-                
-                try {
+                    if (!href || href.startsWith('#') || href.startsWith('javascript:') || 
+                        href.startsWith('mailto:') || href.startsWith('tel:')) return false;
+                    
+                    try {
                     const linkUrl = new URL(href);
                     const baseUrlObj = new URL(baseUrl);
                     return linkUrl.hostname === baseUrlObj.hostname;
-                } catch {
+                    } catch {
                     return false;
-                }
+                    }
                 })
                 .filter((href, index, array) => array.indexOf(href) === index);
             }, baseUrl);
+            } catch (error) {
+            addLog(`❌ Error extracting links: ${error.message}`, 'error');
+            links = [];
+            }
             
             addLog(`  🔗 Found ${links.length} links to test`, 'info');
             
             let brokenLinksOnPage = 0;
-            // Test each link using fetch instead of page.request:
-            for (const link of links.slice(0, 20)) {
+            // Test each link with better error handling
+            for (const link of links.slice(0, 15)) { // Reduced to 15 for stability
             try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
+                
                 const response = await fetch(link, { 
                 method: 'HEAD',
-                timeout: 10000 
-                }).catch(() => fetch(link, { timeout: 10000 }));
+                signal: controller.signal,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+                }).catch(() => 
+                fetch(link, { 
+                    signal: controller.signal,
+                    headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    }
+                })
+                );
+                
+                clearTimeout(timeoutId);
                 
                 if (!response.ok) {
                 brokenLinksOnPage++;
@@ -242,13 +282,15 @@ async function scanWebsite(baseUrl, scanId) {
                 }
                 }
             } catch (error) {
+                if (error.name !== 'AbortError') {
                 brokenLinksOnPage++;
                 allIssues.brokenLinks.push({
-                page: fullUrl,
-                link,
-                status: 'ERROR',
-                error: error.message
+                    page: fullUrl,
+                    link,
+                    status: 'ERROR',
+                    error: error.message
                 });
+                }
             }
             }
             
@@ -256,53 +298,65 @@ async function scanWebsite(baseUrl, scanId) {
             addLog(`  ❌ Found ${brokenLinksOnPage} broken links on this page`, 'warning');
             }
             
-            // Test buttons - Update to use Puppeteer syntax:
-            const buttons = await page.evaluate(() => {
-            const allButtons = [
+            // Test buttons with better error handling
+            let buttons = [];
+            try {
+            buttons = await page.evaluate(() => {
+                const allButtons = [
                 ...document.querySelectorAll('button:not([disabled])'),
                 ...document.querySelectorAll('[role="button"]:not([disabled])'),
                 ...document.querySelectorAll('.btn:not([disabled])'),
                 ...document.querySelectorAll('[onclick]:not([disabled])')
-            ];
-            
-            return allButtons
+                ];
+                
+                return allButtons
                 .filter(el => {
-                const style = window.getComputedStyle(el);
-                return style.display !== 'none' && 
+                    const style = window.getComputedStyle(el);
+                    return style.display !== 'none' && 
                         style.visibility !== 'hidden' && 
                         el.offsetParent !== null;
                 })
                 .map((el, index) => ({
-                index,
-                text: el.textContent?.trim().substring(0, 40) || `Button ${index + 1}`,
-                className: el.className,
-                id: el.id,
-                tagName: el.tagName
+                    index,
+                    text: el.textContent?.trim().substring(0, 40) || `Button ${index + 1}`,
+                    className: el.className,
+                    id: el.id,
+                    tagName: el.tagName
                 }));
             });
+            } catch (error) {
+            addLog(`❌ Error extracting buttons: ${error.message}`, 'error');
+            buttons = [];
+            }
             
             addLog(`  🔘 Found ${buttons.length} buttons to test`, 'info');
             
             let brokenButtonsOnPage = 0;
             let authIssuesOnPage = 0;
             
-            // Test buttons (limit to 5 per page for performance)
-            for (const buttonInfo of buttons.slice(0, 5)) {
-            const buttonPage = await browser.newPage();
-            
-            const buttonErrors = [];
-            buttonPage.on('console', (msg) => {
-                if (msg.type() === 'error') buttonErrors.push(msg.text());
-            });
-            
+            // Test buttons (limit to 3 per page for stability)
+            for (const buttonInfo of buttons.slice(0, 3)) {
+            let buttonPage;
             try {
-                await buttonPage.goto(fullUrl, { timeout: 15000 });
+                buttonPage = await browser.newPage();
+                await buttonPage.setViewport({ width: 1920, height: 1080 });
                 
-                // Use Puppeteer selector syntax:
-                const buttonSelector = buttonInfo.id ? `#${buttonInfo.id}` : 
-                                    `${buttonInfo.tagName.toLowerCase()}:nth-of-type(${buttonInfo.index + 1})`;
+                const buttonErrors = [];
+                buttonPage.on('console', (msg) => {
+                if (msg.type() === 'error') buttonErrors.push(msg.text());
+                });
                 
-                const button = await buttonPage.$(buttonSelector);
+                await buttonPage.goto(fullUrl, { timeout: 15000, waitUntil: 'domcontentloaded' });
+                await buttonPage.waitForTimeout(1000);
+                
+                // More reliable button selection
+                let button;
+                if (buttonInfo.id) {
+                button = await buttonPage.$(`#${buttonInfo.id}`);
+                } else {
+                const buttons = await buttonPage.$$(`${buttonInfo.tagName.toLowerCase()}`);
+                button = buttons[buttonInfo.index];
+                }
                 
                 if (button) {
                 const isVisible = await button.isIntersectingViewport();
@@ -357,9 +411,15 @@ async function scanWebsite(baseUrl, scanId) {
                 button: buttonInfo.text,
                 errors: [error.message]
                 });
+            } finally {
+                if (buttonPage) {
+                try {
+                    await buttonPage.close();
+                } catch (e) {
+                    // Ignore close errors
+                }
+                }
             }
-            
-            await buttonPage.close();
             }
             
             if (brokenButtonsOnPage > 0) {
@@ -376,9 +436,16 @@ async function scanWebsite(baseUrl, scanId) {
             url: fullUrl,
             error: error.message
             });
+        } finally {
+            if (page) {
+            try {
+                await page.close();
+            } catch (e) {
+                // Ignore close errors
+            }
+            }
         }
         
-        await page.close();
         addLog(`  ✅ Completed: ${fullUrl}`, 'success');
         }
     
@@ -420,19 +487,24 @@ async function scanWebsite(baseUrl, scanId) {
   }
 }
 
-const port = process.env.PORT || 10000;
-const host = '0.0.0.0';
+const port = process.env.PORT || 3001; // Use 3001 locally, Render's port in production
+const host = process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost';
 
 const server = app.listen(port, host, () => {
-  console.log(`🚀 WebScan Pro server running on http://${host}:${port}`);
+  const displayHost = host === '0.0.0.0' ? 'localhost' : host;
+  console.log(`🚀 WebScan Pro server running on http://${displayHost}:${port}`);
   console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+  
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`📱 Local access: http://localhost:${port}`);
+  }
 });
 
-
+// Configure timeouts for cloud deployment
 server.keepAliveTimeout = 120000; // 2 minutes
 server.headersTimeout = 120000; // 2 minutes
 
-
+// Graceful shutdown handlers
 process.on('SIGTERM', () => {
   console.log('📤 SIGTERM received, shutting down gracefully...');
   server.close(() => {
