@@ -83,7 +83,19 @@ async function scanWebsite(baseUrl, scanId) {
   try {
     addLog(`🚀 Starting scan for ${baseUrl}`, 'info');
     
-    const browser = await chromium.launch();
+    const browser = await chromium.launch({
+        headless: true,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process', // Important for cloud environments
+            '--disable-gpu'
+        ]
+    });
     const visitedPages = new Set();
     const allIssues = {
       brokenLinks: [],

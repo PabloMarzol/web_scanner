@@ -5,9 +5,10 @@
   "main": "server/server.js",
   "type": "module",
   "scripts": {
+    "build": "npx playwright install --with-deps chromium",
     "start": "node server/server.js",
     "dev": "node server/server.js",
-    "start-testing-server": "node server/server.js"
+    "postinstall": "npx playwright install --with-deps chromium"
   },
   "dependencies": {
     "express": "^4.18.2",
