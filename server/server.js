@@ -1,6 +1,7 @@
 // server.js
 import express from 'express';
 import { chromium } from 'playwright';
+import puppeteer from 'puppeteer';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -83,23 +84,20 @@ async function scanWebsite(baseUrl, scanId) {
   try {
     addLog(`🚀 Starting scan for ${baseUrl}`, 'info');
     
-    const browser = await chromium.launch({
-        headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox', 
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--single-process',
-            '--disable-gpu',
-            '--disable-background-timer-throttling',
-            '--disable-backgrounding-occluded-windows',
-            '--disable-renderer-backgrounding',
-            '--disable-features=TranslateUI',
-            '--disable-ipc-flooding-protection'
-        ]
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process',
+        '--disable-gpu',
+        '--disable-web-security',
+        '--disable-features=VizDisplayCompositor'
+      ]
     });
     const visitedPages = new Set();
     const allIssues = {
@@ -124,259 +122,265 @@ async function scanWebsite(baseUrl, scanId) {
     };
     
     async function crawlPage(pageUrl) {
-      if (visitedPages.has(pageUrl)) return;
-      visitedPages.add(pageUrl);
-      processedPages++;
-      updateProgress();
-      
-      // Construct full URL properly
-      const fullUrl = pageUrl.startsWith('http') ? pageUrl : baseUrl + pageUrl;
-      
-      addLog(`📄 Scanning: ${fullUrl}`, 'info');
-      
-      const context = await browser.newContext();
-      const page = await context.newPage();
-      
-      const pageIssues = {
-        url: fullUrl,
-        errors: [],
-        warnings: []
-      };
-      
-      page.on('console', (msg) => {
-        const text = msg.text();
-        if (msg.type() === 'error') {
-          pageIssues.errors.push(text);
-        } else if (msg.type() === 'warning' && text.includes('Warning:')) {
-          pageIssues.warnings.push(text);
-        }
-      });
-      
-      try {
-        const response = await page.goto(fullUrl, { 
-          timeout: 30000,
-          waitUntil: 'domcontentloaded'
-        });
+        if (visitedPages.has(pageUrl)) return;
+        visitedPages.add(pageUrl);
+        processedPages++;
+        updateProgress();
         
-        if (!response || response.status() >= 400) {
-          addLog(`❌ Page failed to load: ${fullUrl} (Status: ${response?.status() || 'No response'})`, 'error');
-          allIssues.pageErrors.push({
+        const fullUrl = pageUrl.startsWith('http') ? pageUrl : baseUrl + pageUrl;
+        addLog(`📄 Scanning: ${fullUrl}`, 'info');
+        
+        // Replace Playwright context with direct page creation:
+        const page = await browser.newPage();
+        
+        const pageIssues = {
             url: fullUrl,
-            status: response?.status() || 'No response',
-            error: 'Page failed to load'
-          });
-          await context.close();
-          return;
-        }
+            errors: [],
+            warnings: []
+        };
         
-        // Wait for page to stabilize
-        await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {
-          addLog(`⏰ NetworkIdle timeout for ${fullUrl}, continuing...`, 'warning');
+        page.on('console', (msg) => {
+            const text = msg.text();
+            if (msg.type() === 'error') {
+            pageIssues.errors.push(text);
+            } else if (msg.type() === 'warning' && text.includes('Warning:')) {
+            pageIssues.warnings.push(text);
+            }
         });
         
-        // Test links
-        const links = await page.evaluate((baseUrl) => {
-          const allLinks = Array.from(document.querySelectorAll('a[href]'));
-          return allLinks
-            .map(link => {
-              try {
-                let href = link.getAttribute('href');
-                if (!href) return null;
-                
-                if (href.startsWith('/')) {
-                  const baseUrlObj = new URL(baseUrl);
-                  href = baseUrlObj.origin + href;
-                } else if (!href.startsWith('http')) {
-                  href = new URL(href, baseUrl).href;
+        try {
+            const response = await page.goto(fullUrl, { 
+            timeout: 30000,
+            waitUntil: 'domcontentloaded'
+            });
+            
+            if (!response || response.status() >= 400) {
+            addLog(`❌ Page failed to load: ${fullUrl} (Status: ${response?.status() || 'No response'})`, 'error');
+            allIssues.pageErrors.push({
+                url: fullUrl,
+                status: response?.status() || 'No response',
+                error: 'Page failed to load'
+            });
+            await page.close();
+            return;
+            }
+            
+            // Wait for page to stabilize
+            await page.waitForNetworkIdle({ timeout: 10000 }).catch(() => {
+            addLog(`⏰ NetworkIdle timeout for ${fullUrl}, continuing...`, 'warning');
+            });
+            
+            // Test links - Update to use Puppeteer syntax:
+            const links = await page.evaluate((baseUrl) => {
+            const allLinks = Array.from(document.querySelectorAll('a[href]'));
+            return allLinks
+                .map(link => {
+                try {
+                    let href = link.getAttribute('href');
+                    if (!href) return null;
+                    
+                    if (href.startsWith('/')) {
+                    const baseUrlObj = new URL(baseUrl);
+                    href = baseUrlObj.origin + href;
+                    } else if (!href.startsWith('http')) {
+                    href = new URL(href, baseUrl).href;
+                    }
+                    
+                    return href;
+                } catch {
+                    return null;
                 }
+                })
+                .filter(href => {
+                if (!href || href.startsWith('#') || href.startsWith('javascript:') || 
+                    href.startsWith('mailto:') || href.startsWith('tel:')) return false;
                 
-                return href;
-              } catch {
-                return null;
-              }
-            })
-            .filter(href => {
-              if (!href || href.startsWith('#') || href.startsWith('javascript:') || 
-                  href.startsWith('mailto:') || href.startsWith('tel:')) return false;
-              
-              try {
-                const linkUrl = new URL(href);
-                const baseUrlObj = new URL(baseUrl);
-                return linkUrl.hostname === baseUrlObj.hostname;
-              } catch {
-                return false;
-              }
-            })
-            .filter((href, index, array) => array.indexOf(href) === index);
-        }, baseUrl);
-        
-        addLog(`  🔗 Found ${links.length} links to test`, 'info');
-        
-        let brokenLinksOnPage = 0;
-        // Test each link
-        for (const link of links.slice(0, 20)) {
-          try {
-            const linkResponse = await page.request.get(link, { timeout: 10000 });
-            if (linkResponse.status() >= 400) {
-              brokenLinksOnPage++;
-              allIssues.brokenLinks.push({
+                try {
+                    const linkUrl = new URL(href);
+                    const baseUrlObj = new URL(baseUrl);
+                    return linkUrl.hostname === baseUrlObj.hostname;
+                } catch {
+                    return false;
+                }
+                })
+                .filter((href, index, array) => array.indexOf(href) === index);
+            }, baseUrl);
+            
+            addLog(`  🔗 Found ${links.length} links to test`, 'info');
+            
+            let brokenLinksOnPage = 0;
+            // Test each link using fetch instead of page.request:
+            for (const link of links.slice(0, 20)) {
+            try {
+                const response = await fetch(link, { 
+                method: 'HEAD',
+                timeout: 10000 
+                }).catch(() => fetch(link, { timeout: 10000 }));
+                
+                if (!response.ok) {
+                brokenLinksOnPage++;
+                allIssues.brokenLinks.push({
+                    page: fullUrl,
+                    link,
+                    status: response.status,
+                    error: response.statusText
+                });
+                } else {
+                allIssues.workingLinks.push({ page: fullUrl, link });
+                
+                try {
+                    const linkUrl = new URL(link);
+                    const baseUrlObj = new URL(baseUrl);
+                    if (linkUrl.hostname === baseUrlObj.hostname) {
+                    const relativePath = linkUrl.pathname + linkUrl.search;
+                    if (!visitedPages.has(relativePath) && !pagesToCrawl.includes(relativePath)) {
+                        pagesToCrawl.push(relativePath);
+                    }
+                    }
+                } catch (e) {
+                    // Ignore URL parsing errors
+                }
+                }
+            } catch (error) {
+                brokenLinksOnPage++;
+                allIssues.brokenLinks.push({
                 page: fullUrl,
                 link,
-                status: linkResponse.status(),
-                error: linkResponse.statusText()
-              });
-            } else {
-              allIssues.workingLinks.push({ page: fullUrl, link });
-              
-              try {
-                const linkUrl = new URL(link);
-                const baseUrlObj = new URL(baseUrl);
-                if (linkUrl.hostname === baseUrlObj.hostname) {
-                  const relativePath = linkUrl.pathname + linkUrl.search;
-                  if (!visitedPages.has(relativePath) && !pagesToCrawl.includes(relativePath)) {
-                    pagesToCrawl.push(relativePath);
-                  }
-                }
-              } catch (e) {
-                // Ignore URL parsing errors
-              }
+                status: 'ERROR',
+                error: error.message
+                });
             }
-          } catch (error) {
-            brokenLinksOnPage++;
-            allIssues.brokenLinks.push({
-              page: fullUrl,
-              link,
-              status: 'ERROR',
-              error: error.message
+            }
+            
+            if (brokenLinksOnPage > 0) {
+            addLog(`  ❌ Found ${brokenLinksOnPage} broken links on this page`, 'warning');
+            }
+            
+            // Test buttons - Update to use Puppeteer syntax:
+            const buttons = await page.evaluate(() => {
+            const allButtons = [
+                ...document.querySelectorAll('button:not([disabled])'),
+                ...document.querySelectorAll('[role="button"]:not([disabled])'),
+                ...document.querySelectorAll('.btn:not([disabled])'),
+                ...document.querySelectorAll('[onclick]:not([disabled])')
+            ];
+            
+            return allButtons
+                .filter(el => {
+                const style = window.getComputedStyle(el);
+                return style.display !== 'none' && 
+                        style.visibility !== 'hidden' && 
+                        el.offsetParent !== null;
+                })
+                .map((el, index) => ({
+                index,
+                text: el.textContent?.trim().substring(0, 40) || `Button ${index + 1}`,
+                className: el.className,
+                id: el.id,
+                tagName: el.tagName
+                }));
             });
-          }
-        }
-        
-        if (brokenLinksOnPage > 0) {
-          addLog(`  ❌ Found ${brokenLinksOnPage} broken links on this page`, 'warning');
-        }
-        
-        // Test buttons
-        const buttons = await page.evaluate(() => {
-          const allButtons = [
-            ...document.querySelectorAll('button:not([disabled])'),
-            ...document.querySelectorAll('[role="button"]:not([disabled])'),
-            ...document.querySelectorAll('.btn:not([disabled])'),
-            ...document.querySelectorAll('[onclick]:not([disabled])')
-          ];
-          
-          return allButtons
-            .filter(el => {
-              const style = window.getComputedStyle(el);
-              return style.display !== 'none' && 
-                     style.visibility !== 'hidden' && 
-                     el.offsetParent !== null;
-            })
-            .map((el, index) => ({
-              index,
-              text: el.textContent?.trim().substring(0, 40) || `Button ${index + 1}`,
-              className: el.className,
-              id: el.id,
-              tagName: el.tagName
-            }));
-        });
-        
-        addLog(`  🔘 Found ${buttons.length} buttons to test`, 'info');
-        
-        let brokenButtonsOnPage = 0;
-        let authIssuesOnPage = 0;
-        
-        // Test buttons (limit to 5 per page for performance)
-        for (const buttonInfo of buttons.slice(0, 5)) {
-          const buttonContext = await browser.newContext();
-          const buttonPage = await buttonContext.newPage();
-          
-          const buttonErrors = [];
-          buttonPage.on('console', (msg) => {
-            if (msg.type() === 'error') buttonErrors.push(msg.text());
-          });
-          
-          try {
-            await buttonPage.goto(fullUrl, { timeout: 15000 });
-            await buttonPage.waitForLoadState('domcontentloaded');
             
-            const button = buttonPage.locator(`${buttonInfo.tagName}`).nth(buttonInfo.index);
-            const isVisible = await button.isVisible({ timeout: 2000 }).catch(() => false);
-            const isEnabled = await button.isEnabled().catch(() => false);
+            addLog(`  🔘 Found ${buttons.length} buttons to test`, 'info');
             
-            if (isVisible && isEnabled) {
-              await button.click({ timeout: 3000 });
-              await buttonPage.waitForTimeout(1000);
-              
-              const realErrors = buttonErrors.filter(e => 
-                !e.includes('401') && !e.includes('404') && 
-                !e.includes('Unauthorized') && !e.includes('Not Found')
-              );
-              
-              if (realErrors.length > 0) {
+            let brokenButtonsOnPage = 0;
+            let authIssuesOnPage = 0;
+            
+            // Test buttons (limit to 5 per page for performance)
+            for (const buttonInfo of buttons.slice(0, 5)) {
+            const buttonPage = await browser.newPage();
+            
+            const buttonErrors = [];
+            buttonPage.on('console', (msg) => {
+                if (msg.type() === 'error') buttonErrors.push(msg.text());
+            });
+            
+            try {
+                await buttonPage.goto(fullUrl, { timeout: 15000 });
+                
+                // Use Puppeteer selector syntax:
+                const buttonSelector = buttonInfo.id ? `#${buttonInfo.id}` : 
+                                    `${buttonInfo.tagName.toLowerCase()}:nth-of-type(${buttonInfo.index + 1})`;
+                
+                const button = await buttonPage.$(buttonSelector);
+                
+                if (button) {
+                const isVisible = await button.isIntersectingViewport();
+                
+                if (isVisible) {
+                    await button.click();
+                    await buttonPage.waitForTimeout(1000);
+                    
+                    const realErrors = buttonErrors.filter(e => 
+                    !e.includes('401') && !e.includes('404') && 
+                    !e.includes('Unauthorized') && !e.includes('Not Found')
+                    );
+                    
+                    if (realErrors.length > 0) {
+                    brokenButtonsOnPage++;
+                    allIssues.brokenButtons.push({
+                        page: fullUrl,
+                        button: buttonInfo.text,
+                        errors: realErrors
+                    });
+                    } else {
+                    allIssues.workingButtons.push({
+                        page: fullUrl,
+                        button: buttonInfo.text
+                    });
+                    }
+                    
+                    const authErrors = buttonErrors.filter(e => e.includes('401') || e.includes('Unauthorized'));
+                    if (authErrors.length > 0) {
+                    authIssuesOnPage++;
+                    allIssues.authErrors.push({
+                        page: fullUrl,
+                        button: buttonInfo.text,
+                        count: authErrors.length
+                    });
+                    }
+                    
+                    const resourceErrors = buttonErrors.filter(e => e.includes('404') || e.includes('Not Found'));
+                    if (resourceErrors.length > 0) {
+                    allIssues.missingResources.push({
+                        page: fullUrl,
+                        button: buttonInfo.text,
+                        count: resourceErrors.length
+                    });
+                    }
+                }
+                }
+            } catch (error) {
                 brokenButtonsOnPage++;
                 allIssues.brokenButtons.push({
-                  page: fullUrl,
-                  button: buttonInfo.text,
-                  errors: realErrors
+                page: fullUrl,
+                button: buttonInfo.text,
+                errors: [error.message]
                 });
-              } else {
-                allIssues.workingButtons.push({
-                  page: fullUrl,
-                  button: buttonInfo.text
-                });
-              }
-              
-              const authErrors = buttonErrors.filter(e => e.includes('401') || e.includes('Unauthorized'));
-              if (authErrors.length > 0) {
-                authIssuesOnPage++;
-                allIssues.authErrors.push({
-                  page: fullUrl,
-                  button: buttonInfo.text,
-                  count: authErrors.length
-                });
-              }
-              
-              const resourceErrors = buttonErrors.filter(e => e.includes('404') || e.includes('Not Found'));
-              if (resourceErrors.length > 0) {
-                allIssues.missingResources.push({
-                  page: fullUrl,
-                  button: buttonInfo.text,
-                  count: resourceErrors.length
-                });
-              }
             }
-          } catch (error) {
-            brokenButtonsOnPage++;
-            allIssues.brokenButtons.push({
-              page: fullUrl,
-              button: buttonInfo.text,
-              errors: [error.message]
+            
+            await buttonPage.close();
+            }
+            
+            if (brokenButtonsOnPage > 0) {
+            addLog(`  ❌ Found ${brokenButtonsOnPage} broken buttons on this page`, 'warning');
+            }
+            
+            if (authIssuesOnPage > 0) {
+            addLog(`  🔐 Found ${authIssuesOnPage} authentication issues on this page`, 'warning');
+            }
+            
+        } catch (error) {
+            addLog(`❌ Error crawling ${fullUrl}: ${error.message}`, 'error');
+            allIssues.pageErrors.push({
+            url: fullUrl,
+            error: error.message
             });
-          }
-          
-          await buttonContext.close();
         }
         
-        if (brokenButtonsOnPage > 0) {
-          addLog(`  ❌ Found ${brokenButtonsOnPage} broken buttons on this page`, 'warning');
+        await page.close();
+        addLog(`  ✅ Completed: ${fullUrl}`, 'success');
         }
-        
-        if (authIssuesOnPage > 0) {
-          addLog(`  🔐 Found ${authIssuesOnPage} authentication issues on this page`, 'warning');
-        }
-        
-      } catch (error) {
-        addLog(`❌ Error crawling ${fullUrl}: ${error.message}`, 'error');
-        allIssues.pageErrors.push({
-          url: fullUrl,
-          error: error.message
-        });
-      }
-      
-      await context.close();
-      addLog(`  ✅ Completed: ${fullUrl}`, 'success');
-    }
     
     // Crawl pages (limit to 10 pages for demo)
     while (pagesToCrawl.length > 0 && visitedPages.size < 10) {
@@ -424,11 +428,11 @@ const server = app.listen(port, host, () => {
   console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
-// Configure timeouts for cloud deployment
+
 server.keepAliveTimeout = 120000; // 2 minutes
 server.headersTimeout = 120000; // 2 minutes
 
-// Graceful shutdown handlers
+
 process.on('SIGTERM', () => {
   console.log('📤 SIGTERM received, shutting down gracefully...');
   server.close(() => {
