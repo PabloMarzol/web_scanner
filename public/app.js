@@ -61,7 +61,7 @@ class WebsiteTester {
         try {
             console.log('Starting scan for:', url);
             
-            const response = await fetch('/api/scan.js', {
+            const response = await fetch('/api/scan', {
                 method: 'POST',
                 headers: { 
                     'Content-Type': 'application/json',
