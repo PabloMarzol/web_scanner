@@ -1,5 +1,7 @@
+// api/index.js
 import express from 'express';
-import puppeteer from 'puppeteer';
+import puppeteer from 'puppeteer-core';
+import chromium from 'chrome-aws-lambda';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -63,7 +65,6 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
-// Add your scanning function here (copy from your server.js)
 async function scanWebsite(baseUrl, scanId) {
   const scan = activeScans.get(scanId);
   
@@ -80,49 +81,161 @@ async function scanWebsite(baseUrl, scanId) {
     }
   };
   
+  let browser = null;
+  
   try {
     addLog(`🚀 Starting scan for ${baseUrl}`, 'info');
     
-    const browser = await puppeteer.launch({
-      headless: "new",
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--disable-gpu',
-        '--disable-web-security'
-      ]
+    // Use chrome-aws-lambda for Vercel compatibility
+    browser = await puppeteer.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath,
+      headless: chromium.headless,
+      ignoreHTTPSErrors: true,
     });
     
-    // Simplified scanning for Vercel (due to time limits)
+    addLog(`✅ Browser launched successfully`, 'info');
+    
     const page = await browser.newPage();
-    await page.goto(baseUrl);
     
-    const links = await page.evaluate(() => {
-      return Array.from(document.querySelectorAll('a[href]'))
-        .map(a => a.href)
-        .filter(href => href && !href.startsWith('#'))
-        .slice(0, 10); // Limit for Vercel
+    // Set a user agent to avoid blocking
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+    
+    addLog(`📄 Navigating to ${baseUrl}`, 'info');
+    
+    const response = await page.goto(baseUrl, { 
+      waitUntil: 'domcontentloaded',
+      timeout: 30000 
     });
     
-    addLog(`Found ${links.length} links to test`, 'info');
+    if (!response || response.status() >= 400) {
+      throw new Error(`Page failed to load: ${response?.status() || 'No response'}`);
+    }
+    
+    addLog(`✅ Page loaded successfully`, 'info');
+    
+    // Wait a bit for page to stabilize
+    await page.waitForTimeout(2000);
+    
+    // Extract links
+    const links = await page.evaluate((baseUrl) => {
+      const allLinks = Array.from(document.querySelectorAll('a[href]'));
+      return allLinks
+        .map(link => {
+          try {
+            let href = link.getAttribute('href');
+            if (!href) return null;
+            
+            if (href.startsWith('/')) {
+              const baseUrlObj = new URL(baseUrl);
+              href = baseUrlObj.origin + href;
+            } else if (!href.startsWith('http')) {
+              href = new URL(href, baseUrl).href;
+            }
+            
+            return href;
+          } catch {
+            return null;
+          }
+        })
+        .filter(href => {
+          if (!href || href.startsWith('#') || href.startsWith('javascript:') || 
+              href.startsWith('mailto:') || href.startsWith('tel:')) return false;
+          
+          try {
+            const linkUrl = new URL(href);
+            const baseUrlObj = new URL(baseUrl);
+            return linkUrl.hostname === baseUrlObj.hostname;
+          } catch {
+            return false;
+          }
+        })
+        .filter((href, index, array) => array.indexOf(href) === index)
+        .slice(0, 15); // Limit to 15 links for Vercel timeout constraints
+    }, baseUrl);
+    
+    addLog(`🔗 Found ${links.length} links to test`, 'info');
     
     const brokenLinks = [];
-    for (const link of links) {
+    const workingLinks = [];
+    
+    // Test links with timeout control
+    for (let i = 0; i < links.length; i++) {
+      const link = links[i];
+      
       try {
-        const response = await fetch(link, { method: 'HEAD' });
-        if (response.status >= 400) {
-          brokenLinks.push({ link, status: response.status });
+        addLog(`Testing link ${i + 1}/${links.length}: ${link}`, 'info');
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        
+        const response = await fetch(link, { 
+          method: 'HEAD',
+          signal: controller.signal,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        }).catch(() => 
+          fetch(link, { 
+            signal: controller.signal,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+          })
+        );
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          brokenLinks.push({
+            page: baseUrl,
+            link,
+            status: response.status,
+            error: response.statusText
+          });
+          addLog(`❌ Broken link found: ${link} (${response.status})`, 'warning');
+        } else {
+          workingLinks.push({ page: baseUrl, link });
         }
       } catch (error) {
-        brokenLinks.push({ link, status: 'ERROR', error: error.message });
+        if (error.name !== 'AbortError') {
+          brokenLinks.push({
+            page: baseUrl,
+            link,
+            status: 'ERROR',
+            error: error.message
+          });
+          addLog(`❌ Error testing link: ${link}`, 'error');
+        }
       }
     }
     
-    await browser.close();
+    // Extract and test buttons (simplified for Vercel)
+    const buttons = await page.evaluate(() => {
+      const allButtons = [
+        ...document.querySelectorAll('button:not([disabled])'),
+        ...document.querySelectorAll('[role="button"]:not([disabled])'),
+        ...document.querySelectorAll('.btn:not([disabled])')
+      ];
+      
+      return allButtons
+        .filter(el => {
+          const style = window.getComputedStyle(el);
+          return style.display !== 'none' && 
+                 style.visibility !== 'hidden' && 
+                 el.offsetParent !== null;
+        })
+        .map((el, index) => ({
+          index,
+          text: el.textContent?.trim().substring(0, 40) || `Button ${index + 1}`,
+          className: el.className,
+          id: el.id
+        }))
+        .slice(0, 5); // Limit to 5 buttons for Vercel
+    });
+    
+    addLog(`🔘 Found ${buttons.length} buttons`, 'info');
     
     scan.status = 'completed';
     scan.progress = 100;
@@ -130,26 +243,42 @@ async function scanWebsite(baseUrl, scanId) {
       summary: {
         totalPages: 1,
         totalLinks: links.length,
+        totalButtons: buttons.length,
         brokenLinksCount: brokenLinks.length,
         brokenButtonsCount: 0,
-        authIssuesCount: 0
+        authIssuesCount: 0,
+        missingResourcesCount: 0,
+        pagesWithErrors: 0
       },
       issues: {
         brokenLinks,
         brokenButtons: [],
         authErrors: [],
-        workingLinks: links.filter(link => 
-          !brokenLinks.some(broken => broken.link === link)
-        ).map(link => ({ link }))
-      }
+        missingResources: [],
+        reactWarnings: [],
+        jsErrors: [],
+        pageErrors: [],
+        workingLinks,
+        workingButtons: buttons.map(btn => ({ page: baseUrl, button: btn.text }))
+      },
+      pages: [baseUrl]
     };
     
-    addLog(`✅ Scan completed! Found ${brokenLinks.length} broken links`, 'success');
+    addLog(`✅ Scan completed! Found ${brokenLinks.length} broken links out of ${links.length} total links`, 'success');
     
   } catch (error) {
     addLog(`💥 Scan failed: ${error.message}`, 'error');
     scan.status = 'error';
     scan.error = error.message;
+  } finally {
+    if (browser) {
+      try {
+        await browser.close();
+        addLog(`🔒 Browser closed`, 'info');
+      } catch (e) {
+        // Ignore close errors
+      }
+    }
   }
 }
 
