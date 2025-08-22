@@ -1,7 +1,7 @@
-// api/index.js
+// api/index.js (if using @sparticuz/chromium)
 import express from 'express';
 import puppeteer from 'puppeteer-core';
-import chromium from 'chrome-aws-lambda';
+import chromium from '@sparticuz/chromium';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -11,11 +11,8 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
-
-// Serve static files from public directory
 app.use(express.static(path.join(__dirname, '../public')));
 
-// Store active scans
 const activeScans = new Map();
 
 app.post('/api/scan', async (req, res) => {
@@ -42,10 +39,7 @@ app.post('/api/scan', async (req, res) => {
   };
   
   activeScans.set(scanId, scan);
-  
-  // Start scanning in background
   scanWebsite(url, scanId);
-  
   res.json({ scanId, status: 'started' });
 });
 
@@ -60,7 +54,6 @@ app.get('/api/scan/:scanId', (req, res) => {
   res.json(scan);
 });
 
-// Root route to serve the frontend
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
@@ -86,11 +79,13 @@ async function scanWebsite(baseUrl, scanId) {
   try {
     addLog(`🚀 Starting scan for ${baseUrl}`, 'info');
     
-    // Use chrome-aws-lambda for Vercel compatibility
+    // Configure chromium for Vercel
+    const executablePath = await chromium.executablePath();
+    
     browser = await puppeteer.launch({
       args: chromium.args,
       defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath,
+      executablePath,
       headless: chromium.headless,
       ignoreHTTPSErrors: true,
     });
@@ -98,25 +93,22 @@ async function scanWebsite(baseUrl, scanId) {
     addLog(`✅ Browser launched successfully`, 'info');
     
     const page = await browser.newPage();
-    
-    // Set a user agent to avoid blocking
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
     
     addLog(`📄 Navigating to ${baseUrl}`, 'info');
     
     const response = await page.goto(baseUrl, { 
       waitUntil: 'domcontentloaded',
-      timeout: 30000 
+      timeout: 25000 // Reduced timeout for Vercel
     });
     
     if (!response || response.status() >= 400) {
       throw new Error(`Page failed to load: ${response?.status() || 'No response'}`);
     }
     
-    addLog(`✅ Page loaded successfully`, 'info');
+    addLog(`✅ Page loaded successfully (Status: ${response.status()})`, 'info');
     
-    // Wait a bit for page to stabilize
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(1000);
     
     // Extract links
     const links = await page.evaluate((baseUrl) => {
@@ -152,7 +144,7 @@ async function scanWebsite(baseUrl, scanId) {
           }
         })
         .filter((href, index, array) => array.indexOf(href) === index)
-        .slice(0, 15); // Limit to 15 links for Vercel timeout constraints
+        .slice(0, 10); // Limit to 10 links for Vercel
     }, baseUrl);
     
     addLog(`🔗 Found ${links.length} links to test`, 'info');
@@ -160,15 +152,12 @@ async function scanWebsite(baseUrl, scanId) {
     const brokenLinks = [];
     const workingLinks = [];
     
-    // Test links with timeout control
     for (let i = 0; i < links.length; i++) {
       const link = links[i];
       
       try {
-        addLog(`Testing link ${i + 1}/${links.length}: ${link}`, 'info');
-        
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
         
         const response = await fetch(link, { 
           method: 'HEAD',
@@ -194,7 +183,6 @@ async function scanWebsite(baseUrl, scanId) {
             status: response.status,
             error: response.statusText
           });
-          addLog(`❌ Broken link found: ${link} (${response.status})`, 'warning');
         } else {
           workingLinks.push({ page: baseUrl, link });
         }
@@ -206,36 +194,9 @@ async function scanWebsite(baseUrl, scanId) {
             status: 'ERROR',
             error: error.message
           });
-          addLog(`❌ Error testing link: ${link}`, 'error');
         }
       }
     }
-    
-    // Extract and test buttons (simplified for Vercel)
-    const buttons = await page.evaluate(() => {
-      const allButtons = [
-        ...document.querySelectorAll('button:not([disabled])'),
-        ...document.querySelectorAll('[role="button"]:not([disabled])'),
-        ...document.querySelectorAll('.btn:not([disabled])')
-      ];
-      
-      return allButtons
-        .filter(el => {
-          const style = window.getComputedStyle(el);
-          return style.display !== 'none' && 
-                 style.visibility !== 'hidden' && 
-                 el.offsetParent !== null;
-        })
-        .map((el, index) => ({
-          index,
-          text: el.textContent?.trim().substring(0, 40) || `Button ${index + 1}`,
-          className: el.className,
-          id: el.id
-        }))
-        .slice(0, 5); // Limit to 5 buttons for Vercel
-    });
-    
-    addLog(`🔘 Found ${buttons.length} buttons`, 'info');
     
     scan.status = 'completed';
     scan.progress = 100;
@@ -243,7 +204,7 @@ async function scanWebsite(baseUrl, scanId) {
       summary: {
         totalPages: 1,
         totalLinks: links.length,
-        totalButtons: buttons.length,
+        totalButtons: 0,
         brokenLinksCount: brokenLinks.length,
         brokenButtonsCount: 0,
         authIssuesCount: 0,
@@ -259,12 +220,12 @@ async function scanWebsite(baseUrl, scanId) {
         jsErrors: [],
         pageErrors: [],
         workingLinks,
-        workingButtons: buttons.map(btn => ({ page: baseUrl, button: btn.text }))
+        workingButtons: []
       },
       pages: [baseUrl]
     };
     
-    addLog(`✅ Scan completed! Found ${brokenLinks.length} broken links out of ${links.length} total links`, 'success');
+    addLog(`✅ Scan completed! Found ${brokenLinks.length} broken links out of ${links.length} total`, 'success');
     
   } catch (error) {
     addLog(`💥 Scan failed: ${error.message}`, 'error');
@@ -274,7 +235,6 @@ async function scanWebsite(baseUrl, scanId) {
     if (browser) {
       try {
         await browser.close();
-        addLog(`🔒 Browser closed`, 'info');
       } catch (e) {
         // Ignore close errors
       }
