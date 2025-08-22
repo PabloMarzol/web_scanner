@@ -49,7 +49,11 @@ class WebsiteTester {
         
         // Validate URL
         try {
-            new URL(url);
+            const response = await fetch('/api/scan', { 
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, scanId: this.currentScanId })
+        });
         } catch {
             this.showNotification('Please enter a valid URL (including http:// or https://)', 'error');
             return;
@@ -118,7 +122,7 @@ class WebsiteTester {
     async pollForResults() {
         this.pollInterval = setInterval(async () => {
             try {
-                const response = await fetch(`/api/scan/${this.currentScanId}`);
+                const response = await fetch(`/api/scan?scanId=${this.currentScanId}`); // Updated URL
                 const scan = await response.json();
                 
                 // Update progress with smooth animation
