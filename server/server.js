@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const port = process.env.PORT || 3001;
+
 
 app.use(cors());
 app.use(express.json());
@@ -416,6 +416,42 @@ async function scanWebsite(baseUrl, scanId) {
   }
 }
 
-app.listen(port, () => {
-  console.log(`Testing server running at http://localhost:${port}`);
+const port = process.env.PORT || 10000;
+const host = '0.0.0.0';
+
+const server = app.listen(port, host, () => {
+  console.log(`🚀 WebScan Pro server running on http://${host}:${port}`);
+  console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+});
+
+// Configure timeouts for cloud deployment
+server.keepAliveTimeout = 120000; // 2 minutes
+server.headersTimeout = 120000; // 2 minutes
+
+// Graceful shutdown handlers
+process.on('SIGTERM', () => {
+  console.log('📤 SIGTERM received, shutting down gracefully...');
+  server.close(() => {
+    console.log('✅ Server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('📤 SIGINT received, shutting down gracefully...');
+  server.close(() => {
+    console.log('✅ Server closed');
+    process.exit(0);
+  });
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
+  console.error('💥 Uncaught Exception:', err);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
 });
