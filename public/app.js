@@ -49,11 +49,7 @@ class WebsiteTester {
         
         // Validate URL
         try {
-            const response = await fetch('/api/scan', { 
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url, scanId: this.currentScanId })
-        });
+            new URL(url);
         } catch {
             this.showNotification('Please enter a valid URL (including http:// or https://)', 'error');
             return;
@@ -63,15 +59,28 @@ class WebsiteTester {
         this.currentScanId = 'scan_' + Date.now();
         
         try {
+            console.log('Starting scan for:', url);
+            
             const response = await fetch('/api/scan', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
                 body: JSON.stringify({ url, scanId: this.currentScanId })
             });
             
+            console.log('Response status:', response.status);
+            console.log('Response headers:', response.headers);
+            
             if (!response.ok) {
-                throw new Error('Failed to start scan');
+                const errorText = await response.text();
+                console.error('Response error:', errorText);
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
             }
+            
+            const result = await response.json();
+            console.log('Scan started:', result);
             
             this.hideLoadingOverlay();
             
@@ -83,6 +92,7 @@ class WebsiteTester {
             this.pollForResults();
             
         } catch (error) {
+            console.error('Full error details:', error);
             this.hideLoadingOverlay();
             this.showNotification('Error starting scan: ' + error.message, 'error');
         }
