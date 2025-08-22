@@ -1,0 +1,20 @@
+{
+  "name": "webscan-pro",
+  "version": "1.0.0",
+  "description": "Website testing tool",
+  "main": "server/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "node server/server.js",
+    "start-testing-server": "node server/server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "playwright": "^1.40.0",
+    "cors": "^2.8.5"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}

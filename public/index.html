@@ -1,0 +1,330 @@
+<!-- public/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebScanner - Website Testing Tool</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/chart.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    animation: {
+                        'gradient': 'gradient 15s ease infinite',
+                        'float': 'float 3s ease-in-out infinite',
+                        'pulse-slow': 'pulse 3s linear infinite',
+                        'slide-up': 'slideUp 0.5s ease-out',
+                        'fade-in': 'fadeIn 0.6s ease-out'
+                    },
+                    keyframes: {
+                        gradient: {
+                            '0%, 100%': {
+                                'background-size': '200% 200%',
+                                'background-position': 'left center'
+                            },
+                            '50%': {
+                                'background-size': '200% 200%',
+                                'background-position': 'right center'
+                            }
+                        },
+                        float: {
+                            '0%, 100%': { transform: 'translateY(0px)' },
+                            '50%': { transform: 'translateY(-10px)' }
+                        },
+                        slideUp: {
+                            '0%': { transform: 'translateY(100px)', opacity: '0' },
+                            '100%': { transform: 'translateY(0)', opacity: '1' }
+                        },
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .glass {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .glass-dark {
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .gradient-text {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .floating-card {
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            transition: all 0.3s ease;
+        }
+        .floating-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+        }
+        .glow {
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+        }
+        .glow:hover {
+            box-shadow: 0 0 30px rgba(59, 130, 246, 0.5);
+        }
+        .scrollbar-thin {
+            scrollbar-width: thin;
+            scrollbar-color: rgba(107, 114, 128, 0.5) transparent;
+        }
+
+        .scrollbar-thin::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .scrollbar-thin::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .scrollbar-thin::-webkit-scrollbar-thumb {
+            background-color: rgba(107, 114, 128, 0.5);
+            border-radius: 3px;
+        }
+
+        .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+            background-color: rgba(107, 114, 128, 0.8);
+        }
+
+        /* Pulse animation for loading */
+        @keyframes pulse-glow {
+            0%, 100% {
+                box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
+            }
+            50% {
+                box-shadow: 0 0 30px rgba(59, 130, 246, 0.8);
+            }
+        }
+
+        .pulse-glow {
+            animation: pulse-glow 2s ease-in-out infinite;
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 animate-gradient">
+    <!-- Animated Background -->
+    <div class="fixed inset-0 overflow-hidden pointer-events-none">
+        <div class="absolute -top-4 -left-4 w-72 h-72 bg-purple-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-float"></div>
+        <div class="absolute -top-4 -right-4 w-72 h-72 bg-blue-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-float" style="animation-delay: -1s;"></div>
+        <div class="absolute -bottom-8 left-20 w-72 h-72 bg-pink-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-float" style="animation-delay: -2s;"></div>
+    </div>
+
+    <div class="relative z-10 container mx-auto px-4 py-8">
+        <div class="max-w-6xl mx-auto">
+            <!-- Header -->
+            <div class="text-center mb-12 animate-fade-in">
+                <div class="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-r from-blue-500 to-purple-600 rounded-3xl mb-6 animate-float">
+                    <i class="fas fa-search text-3xl text-white"></i>
+                </div>
+                <h1 class="text-6xl font-bold mb-4 gradient-text">
+                    WebScan Pro
+                </h1>
+                <p class="text-xl text-gray-300 max-w-2xl mx-auto">
+                     Website testing tool. Scan any website for broken links, buttons, and performance issues with real-time analytics.
+                </p>
+            </div>
+            
+            <!-- Input Form -->
+            <div class="glass rounded-3xl p-8 mb-8 floating-card animate-slide-up">
+                <div class="flex flex-col md:flex-row gap-4">
+                    <div class="flex-1 relative">
+                        <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                            <i class="fas fa-globe text-gray-400"></i>
+                        </div>
+                        <input 
+                            type="url" 
+                            id="websiteUrl" 
+                            placeholder="Enter website URL (e.g., https://example.com)"
+                            class="w-full pl-12 pr-4 py-4 bg-white/10 border border-white/20 rounded-2xl text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent backdrop-blur-sm transition-all duration-300"
+                            required
+                        >
+                    </div>
+                    <button 
+                        id="startScan" 
+                        class="px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-2xl hover:from-blue-700 hover:to-purple-700 transition-all duration-300 font-semibold flex items-center gap-2 glow group"
+                    >
+                        <i class="fas fa-rocket group-hover:animate-pulse"></i>
+                        Start Scan
+                    </button>
+                </div>
+                <p class="text-sm text-gray-400 mt-4 flex items-center gap-2">
+                    <i class="fas fa-info-circle"></i>
+                    Enter the full URL of the website you want to test (including http:// or https://)
+                </p>
+            </div>
+            
+            <!-- Progress Section -->
+            <div id="progressSection" class="glass-dark rounded-3xl p-8 mb-8 hidden animate-slide-up">
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-2xl font-bold text-white flex items-center gap-3">
+                        <div class="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center animate-pulse-slow">
+                            <i class="fas fa-cog animate-spin text-white text-sm"></i>
+                        </div>
+                        Scanning Website...
+                    </h2>
+                    <div class="text-right">
+                        <span id="progressPercent" class="text-3xl font-bold text-blue-400">0%</span>
+                        <p class="text-sm text-gray-400">Complete</p>
+                    </div>
+                </div>
+                
+                <!-- Progress Bar -->
+                <div class="relative w-full bg-gray-700 rounded-full h-3 mb-6 overflow-hidden">
+                    <div id="progressBar" class="bg-gradient-to-r from-blue-500 to-purple-500 h-3 rounded-full transition-all duration-500 relative overflow-hidden" style="width: 0%">
+                        <div class="absolute inset-0 bg-white/20 animate-pulse"></div>
+                    </div>
+                </div>
+                
+                <p id="progressStatus" class="text-gray-300 mb-6 flex items-center gap-2">
+                    <i class="fas fa-circle-notch animate-spin text-blue-400"></i>
+                    Initializing scan...
+                </p>
+                
+                <!-- Real-time Logs -->
+                <div class="bg-black/50 rounded-2xl p-6 backdrop-blur-sm border border-white/10">
+                    <h3 class="text-white font-semibold mb-4 flex items-center gap-2">
+                        <i class="fas fa-terminal text-green-400"></i>
+                        Real-time Logs
+                    </h3>
+                    <div id="realTimeLogs" class="text-sm font-mono space-y-1 h-64 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-transparent"></div>
+                </div>
+            </div>
+            
+            <!-- Results Section -->
+            <div id="resultsSection" class="hidden">
+                <!-- Summary Cards -->
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                    <div class="glass rounded-2xl p-6 floating-card group animate-slide-up">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-gray-400 text-sm mb-1">Pages Scanned</p>
+                                <p id="totalPages" class="text-3xl font-bold text-white">0</p>
+                            </div>
+                            <div class="w-12 h-12 bg-blue-500/20 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                                <i class="fas fa-file-alt text-2xl text-blue-400"></i>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="glass rounded-2xl p-6 floating-card group animate-slide-up" style="animation-delay: 0.1s;">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-gray-400 text-sm mb-1">Broken Links</p>
+                                <p id="brokenLinks" class="text-3xl font-bold text-red-400">0</p>
+                            </div>
+                            <div class="w-12 h-12 bg-red-500/20 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                                <i class="fas fa-link text-2xl text-red-400"></i>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="glass rounded-2xl p-6 floating-card group animate-slide-up" style="animation-delay: 0.2s;">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-gray-400 text-sm mb-1">Broken Buttons</p>
+                                <p id="brokenButtons" class="text-3xl font-bold text-orange-400">0</p>
+                            </div>
+                            <div class="w-12 h-12 bg-orange-500/20 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                                <i class="fas fa-hand-pointer text-2xl text-orange-400"></i>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="glass rounded-2xl p-6 floating-card group animate-slide-up" style="animation-delay: 0.3s;">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-gray-400 text-sm mb-1">Auth Issues</p>
+                                <p id="authIssues" class="text-3xl font-bold text-yellow-400">0</p>
+                            </div>
+                            <div class="w-12 h-12 bg-yellow-500/20 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                                <i class="fas fa-shield-alt text-2xl text-yellow-400"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Chart Section -->
+                <div class="glass rounded-3xl p-8 mb-8 floating-card animate-slide-up" style="animation-delay: 0.4s;">
+                    <h3 class="text-2xl font-bold text-white mb-6 flex items-center gap-3">
+                        <i class="fas fa-chart-pie text-purple-400"></i>
+                        Issues Overview
+                    </h3>
+                    <div class="relative h-96">
+                        <canvas id="issuesChart"></canvas>
+                    </div>
+                </div>
+                
+                <!-- Detailed Results -->
+                <div class="space-y-6">
+                    <!-- Broken Links -->
+                    <div class="glass rounded-3xl p-8 floating-card animate-slide-up" style="animation-delay: 0.5s;">
+                        <h3 class="text-2xl font-bold text-red-400 mb-6 flex items-center gap-3">
+                            <i class="fas fa-unlink"></i>
+                            Broken Links
+                        </h3>
+                        <div id="brokenLinksList" class="space-y-4"></div>
+                    </div>
+                    
+                    <!-- Broken Buttons -->
+                    <div class="glass rounded-3xl p-8 floating-card animate-slide-up" style="animation-delay: 0.6s;">
+                        <h3 class="text-2xl font-bold text-orange-400 mb-6 flex items-center gap-3">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            Broken Buttons
+                        </h3>
+                        <div id="brokenButtonsList" class="space-y-4"></div>
+                    </div>
+                    
+                    <!-- Auth Issues -->
+                    <div class="glass rounded-3xl p-8 floating-card animate-slide-up" style="animation-delay: 0.7s;">
+                        <h3 class="text-2xl font-bold text-yellow-400 mb-6 flex items-center gap-3">
+                            <i class="fas fa-key"></i>
+                            Authentication Issues
+                        </h3>
+                        <div id="authIssuesList" class="space-y-4"></div>
+                    </div>
+                    
+                    <!-- Export Section -->
+                    <div class="glass rounded-3xl p-8 floating-card animate-slide-up" style="animation-delay: 0.8s;">
+                        <h3 class="text-2xl font-bold text-white mb-6 flex items-center gap-3">
+                            <i class="fas fa-download text-green-400"></i>
+                            Export Report
+                        </h3>
+                        <p class="text-gray-400 mb-6">Download a report with all findings and recommendations.</p>
+                        <button id="downloadReport" class="px-8 py-4 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-2xl hover:from-green-700 hover:to-emerald-700 transition-all duration-300 font-semibold flex items-center gap-3 glow group">
+                            <i class="fas fa-file-download group-hover:animate-bounce"></i>
+                            Download Detailed Report (JSON)
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Animation Overlay -->
+    <div id="loadingOverlay" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden flex items-center justify-center">
+        <div class="glass rounded-3xl p-8 text-center">
+            <div class="w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse-slow">
+                <i class="fas fa-search text-white text-2xl animate-spin"></i>
+            </div>
+            <h3 class="text-xl font-bold text-white mb-2">Initializing Scan</h3>
+            <p class="text-gray-400">Please wait while we prepare the scanner...</p>
+        </div>
+    </div>
+    
+    <script src="app.js"></script>
+</body>
+</html>
