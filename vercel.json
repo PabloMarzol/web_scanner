@@ -1,4 +1,9 @@
 {
-  "version": 2
-  
+  "version": 2,
+  "functions": {
+    "api/scan.js": {
+      "maxDuration": 60
+    }
+  },
+  "regions": ["iad1"]
 }

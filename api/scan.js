@@ -1,8 +1,7 @@
-
 import puppeteer from 'puppeteer-core';
 import chromium from '@sparticuz/chromium';
 
-// Store active scans (same as your server.js)
+
 const activeScans = new Map();
 
 export default async function handler(req, res) {
@@ -15,7 +14,7 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // POST /api/scan - Start scan (same logic as your server.js)
+
   if (req.method === 'POST') {
     const { url, scanId } = req.body;
     
@@ -41,13 +40,20 @@ export default async function handler(req, res) {
     
     activeScans.set(scanId, scan);
     
-    // Start scanning in background (your exact function)
-    scanWebsite(url, scanId);
+
+    scanWebsite(url, scanId).catch(error => {
+      console.error('Scan error:', error);
+      const failedScan = activeScans.get(scanId);
+      if (failedScan) {
+        failedScan.status = 'error';
+        failedScan.error = error.message;
+      }
+    });
     
     return res.json({ scanId, status: 'started' });
   }
 
-  // GET /api/scan?scanId=xxx - Get scan status (same as your server.js)
+
   if (req.method === 'GET') {
     const { scanId } = req.query;
     const scan = activeScans.get(scanId);
@@ -85,11 +91,15 @@ async function scanWebsite(baseUrl, scanId) {
     }
   };
   
+  let browser;
+  
   try {
     addLog(`🚀 Starting scan for ${baseUrl}`, 'info');
     
-    // ONLY CHANGE: Use chromium for Vercel instead of regular puppeteer
-    const browser = await puppeteer.launch({
+    // FIXED: Better Vercel chromium setup
+    const executablePath = await chromium.executablePath();
+    
+    browser = await puppeteer.launch({
       args: [
         ...chromium.args,
         '--no-sandbox',
@@ -112,7 +122,7 @@ async function scanWebsite(baseUrl, scanId) {
         '--disable-default-apps'
       ],
       defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(),
+      executablePath,
       headless: chromium.headless,
       ignoreHTTPSErrors: true,
       timeout: 60000 // 60 second timeout
@@ -245,11 +255,11 @@ async function scanWebsite(baseUrl, scanId) {
             addLog(`  🔗 Found ${links.length} links to test`, 'info');
             
             let brokenLinksOnPage = 0;
-            // Test each link with better error handling
-            for (const link of links.slice(0, 15)) { // Reduced to 15 for stability
+            // Test each link with better error handling (reduced for Vercel)
+            for (const link of links.slice(0, 8)) { // Reduced from 15 to 8 for Vercel timeout limits
             try {
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 10000);
+                const timeoutId = setTimeout(() => controller.abort(), 8000); // Reduced timeout
                 
                 const response = await fetch(link, { 
                 method: 'HEAD',
@@ -345,8 +355,8 @@ async function scanWebsite(baseUrl, scanId) {
             let brokenButtonsOnPage = 0;
             let authIssuesOnPage = 0;
             
-            // Test buttons (limit to 3 per page for stability)
-            for (const buttonInfo of buttons.slice(0, 3)) {
+            // Test buttons (limit to 2 per page for Vercel timeout)
+            for (const buttonInfo of buttons.slice(0, 2)) { // Reduced from 3 to 2
             let buttonPage;
             try {
                 buttonPage = await browser.newPage();
@@ -357,8 +367,8 @@ async function scanWebsite(baseUrl, scanId) {
                 if (msg.type() === 'error') buttonErrors.push(msg.text());
                 });
                 
-                await buttonPage.goto(fullUrl, { timeout: 15000, waitUntil: 'domcontentloaded' });
-                await buttonPage.waitForTimeout(1000);
+                await buttonPage.goto(fullUrl, { timeout: 12000, waitUntil: 'domcontentloaded' }); // Reduced timeout
+                await buttonPage.waitForTimeout(500); // Reduced wait time
                 
                 // More reliable button selection
                 let button;
@@ -374,7 +384,7 @@ async function scanWebsite(baseUrl, scanId) {
                 
                 if (isVisible) {
                     await button.click();
-                    await buttonPage.waitForTimeout(1000);
+                    await buttonPage.waitForTimeout(500); // Reduced wait time
                     
                     const realErrors = buttonErrors.filter(e => 
                     !e.includes('401') && !e.includes('404') && 
@@ -460,13 +470,11 @@ async function scanWebsite(baseUrl, scanId) {
         addLog(`  ✅ Completed: ${fullUrl}`, 'success');
     }
     
-    // Crawl pages (limit to 5 pages for Vercel timeout)
-    while (pagesToCrawl.length > 0 && visitedPages.size < 5) {
+    // Crawl pages (limit to 3 pages for Vercel timeout - reduced from 5)
+    while (pagesToCrawl.length > 0 && visitedPages.size < 3) {
       const currentUrl = pagesToCrawl.shift();
       await crawlPage(currentUrl);
     }
-    
-    await browser.close();
     
     // Generate summary
     const summary = {
@@ -495,5 +503,13 @@ async function scanWebsite(baseUrl, scanId) {
     addLog(`💥 Scan failed: ${error.message}`, 'error');
     scan.status = 'error';
     scan.error = error.message;
+  } finally {
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (error) {
+        console.error('Error closing browser:', error);
+      }
+    }
   }
 }
