@@ -240,7 +240,7 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
       pageErrors: [],
       workingLinks: [],
       workingButtons: [],
-      // New comprehensive categories
+      // New categories
       performanceData: [],
       seoData: [],
       seoIssues: [],
@@ -251,7 +251,7 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
     const pagesToCrawl = ['/'];
     let processedPages = 0;
     
-    // Update progress with better calculation for comprehensive scans
+    // Update progress with better calculation for scans
     const updateProgress = () => {
       const totalExpected = Math.max(visitedPages.size + pagesToCrawl.length, 10);
       const progressPercent = Math.min(90, (processedPages / totalExpected) * 100);
@@ -317,12 +317,12 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
             const waitTime = isRenderProduction ? 1000 : 2000;
             await new Promise(resolve => setTimeout(resolve, waitTime));
             addLog(` Page loaded successfully`, 'success');
-                        // Try to find sitemap.xml for comprehensive page discovery
+                        // Try to find sitemap.xml for page discovery
             if (processedPages === 1) { // Only try on first page
               await discoverAdditionalPages(baseUrl, pagesToCrawl, visitedPages, addLog);
             }
             
-            // ENHANCED COMPREHENSIVE link discovery
+            // ENHANCED link discovery
             let links = [];
             try {
               links = await page.evaluate((baseUrl, limit) => {
@@ -332,7 +332,7 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
                   // 1. Standard navigation links
                   const navLinks = Array.from(document.querySelectorAll('a[href]'));
                   
-                  // 2. Links in navigation menus (more comprehensive selectors)
+                  // 2. Links in navigation menus (more selectors)
                   const menuLinks = Array.from(document.querySelectorAll(`
                     nav a[href], .nav a[href], .navigation a[href], .menu a[href],
                     .navbar a[href], .header a[href], .footer a[href],
@@ -509,7 +509,7 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
                   } else {
                       allIssues.workingLinks.push({ page: fullUrl, link });
                       
-                      // Add working internal links to crawl queue for comprehensive scanning
+                      // Add working internal links to crawl queue for scanning
                       try {
                           const linkUrl = new URL(link);
                           const baseUrlObj = new URL(baseUrl);
@@ -549,10 +549,10 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
               addLog(`Found ${brokenLinksOnPage} broken links`, 'warning');
             }
             
-            // Button testing - enabled for comprehensive scans
+            // Button testing - enabled for scans
             if (options.includeButtons !== false) {
               let buttons = [];
-              // COMPREHENSIVE BUTTON DISCOVERY
+              // BUTTON DISCOVERY
               try {
                 buttons = await page.evaluate(() => {
                   const allButtonElements = [
@@ -727,7 +727,7 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
                   }
                 }
               }
-              if (options.includeSEO !== false && processedPages <= 30) { 
+              if (options.includeSEO !== false && processedPages <= 100) { 
                 try {
                   const seoData = await page.evaluate(() => {
                     return {
@@ -786,7 +786,7 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
                 }
               }
               
-              if (options.includePerformance !== false && processedPages <= 50) { // Test performance on first 10 pages
+              if (options.includePerformance !== false && processedPages <= 100) { // Test performance on first 10 pages
                 try {
                   const performanceMetrics = await page.evaluate(() => {
                     const navigation = performance.getEntriesByType('navigation')[0];
@@ -932,7 +932,7 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
     
     addLog(` Deep scan configuration: maxPages=${pageLimit}, maxLinks=${linkLimit}, depth=${options.testDepth}`, 'info');
     
-    // COMPREHENSIVE DISCOVERY FUNCTION
+    // DISCOVERY FUNCTION
     async function discoverAdditionalPages(baseUrl, pagesToCrawl, visitedPages, addLog) {
       const baseUrlObj = new URL(baseUrl);
       const discoveryMethods = [];
@@ -1113,7 +1113,7 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
       });
       
       // Execute all discovery methods
-      addLog(` Starting comprehensive page discovery...`, 'info');
+      addLog(` Starting page discovery...`, 'info');
       let totalFound = 0;
       
       for (const method of discoveryMethods) {
@@ -1128,7 +1128,7 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
       addLog(` Page discovery complete! Found ${totalFound} additional pages to scan`, totalFound > 0 ? 'success' : 'info');
     }
     
-    // Crawl pages - COMPREHENSIVE SCANNING
+    // Crawl pages - SCANNING
     let consecutiveErrors = 0;
     const maxConsecutiveErrors = 5;
     
@@ -1168,7 +1168,7 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
       updateProgress();
     }
     
-    // Generate comprehensive summary
+    // Generate summary
     const summary = {
       totalPages: visitedPages.size,
       totalLinks: allIssues.brokenLinks.length + allIssues.workingLinks.length,
@@ -1178,7 +1178,7 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
       authIssuesCount: allIssues.authErrors.length,
       missingResourcesCount: allIssues.missingResources.length,
       pagesWithErrors: allIssues.pageErrors.length,
-      // New comprehensive metrics
+      // New metrics
       seoIssuesCount: allIssues.seoIssues?.length || 0,
       performanceIssuesCount: allIssues.performanceData?.filter(p => 
         p.firstContentfulPaint > 3000 || p.totalElements > 1500 || p.pageSize > 2000

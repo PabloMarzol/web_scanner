@@ -2,16 +2,46 @@ class WebsiteTester {
     constructor() {
         this.currentScanId = null;
         this.pollInterval = null;
+        this.currentResults = null;
+        this.displayedLogs = new Set();
         this.initEventListeners();
         this.addEntranceAnimations();
+        this.initTabs();
     }
     
     addEntranceAnimations() {
-        // Stagger animations for cards and sections
         const animatedElements = document.querySelectorAll('.animate-slide-up');
         animatedElements.forEach((el, index) => {
             el.style.animationDelay = `${index * 0.1}s`;
         });
+    }
+    
+    initTabs() {
+        const tabButtons = document.querySelectorAll('.tab-button');
+        tabButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                const tabName = button.getAttribute('data-tab');
+                this.switchTab(tabName);
+            });
+        });
+    }
+    switchTab(tabName) {
+        // Update active button
+        document.querySelectorAll('.tab-button').forEach(btn => {
+            btn.classList.remove('active', 'bg-blue-500/20', 'text-blue-400', 'border-blue-500/30');
+            btn.classList.add('bg-white/5', 'text-gray-400', 'border-white/10');
+        });
+        
+        const activeButton = document.querySelector(`[data-tab="${tabName}"]`);
+        activeButton.classList.remove('bg-white/5', 'text-gray-400', 'border-white/10');
+        activeButton.classList.add('active', 'bg-blue-500/20', 'text-blue-400', 'border-blue-500/30');
+        
+        // Show corresponding content
+        document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.add('hidden');
+        });
+        
+        document.getElementById(`${tabName}Tab`).classList.remove('hidden');
     }
     
     initEventListeners() {
@@ -20,6 +50,7 @@ class WebsiteTester {
             if (e.key === 'Enter') this.startScan();
         });
         document.getElementById('downloadReport').addEventListener('click', () => this.downloadReport());
+        document.getElementById('downloadCSV').addEventListener('click', () => this.downloadCSV());
         
         // Add input animation
         const urlInput = document.getElementById('websiteUrl');
@@ -58,6 +89,9 @@ class WebsiteTester {
         this.showLoadingOverlay();
         this.currentScanId = 'scan_' + Date.now();
         
+        // Reset displayed logs for new scan
+        this.displayedLogs = new Set();
+        
         try {
             console.log('Starting scan for:', url);
             
@@ -67,15 +101,25 @@ class WebsiteTester {
                     'Content-Type': 'application/json',
                     'Accept': 'application/json'
                 },
-                body: JSON.stringify({ url, scanId: this.currentScanId })
+                body: JSON.stringify({ 
+                    url, 
+                    scanId: this.currentScanId,
+                    options: {
+                        comprehensive: true,
+                        testDepth: 'deep',
+                        maxPages: 100,
+                        maxLinks: 50,
+                        includeButtons: true,
+                        includeForms: true,
+                        includeResources: true,
+                        includePerformance: true,
+                        includeSEO: true
+                    }
+                })
             });
-            
-            console.log('Response status:', response.status);
-            console.log('Response headers:', response.headers);
             
             if (!response.ok) {
                 const errorText = await response.text();
-                console.error('Response error:', errorText);
                 throw new Error(`HTTP ${response.status}: ${errorText}`);
             }
             
@@ -124,15 +168,16 @@ class WebsiteTester {
         setTimeout(() => {
             notification.style.transform = 'translateX(100%)';
             setTimeout(() => {
-                document.body.removeChild(notification);
+                if (document.body.contains(notification)) {
+                    document.body.removeChild(notification);
+                }
             }, 500);
-        }, 3000);
+        }, 4000);
     }
     
     async pollForResults() {
         this.pollInterval = setInterval(async () => {
             try {
-                // FIXED: Use query parameter instead of path parameter for Vercel
                 const response = await fetch(`/api/scan?scanId=${this.currentScanId}`);
                 const scan = await response.json();
                 
@@ -148,11 +193,11 @@ class WebsiteTester {
                 
                 if (scan.status === 'running') {
                     document.getElementById('progressStatus').innerHTML = 
-                        `<i class="fas fa-circle-notch animate-spin text-blue-400"></i> Scanning pages and testing functionality... ${Math.round(scan.progress)}% complete`;
+                        `<i class="fas fa-circle-notch animate-spin text-blue-400"></i> Deep scanning: pages, links, buttons, forms, performance, SEO... ${Math.round(scan.progress)}% complete`;
                 } else if (scan.status === 'completed') {
                     clearInterval(this.pollInterval);
                     document.getElementById('progressSection').classList.add('hidden');
-                    this.displayResults(scan.results);
+                    this.displayComprehensiveResults(scan.results);
                     this.showNotification('Scan completed successfully!', 'success');
                 } else if (scan.status === 'error') {
                     clearInterval(this.pollInterval);
@@ -171,13 +216,8 @@ class WebsiteTester {
     updateLogs(logs) {
         const logsContainer = document.getElementById('realTimeLogs');
         
-        // Keep track of already displayed logs to avoid duplicates
-        if (!this.displayedLogs) {
-            this.displayedLogs = new Set();
-        }
-        
-        // Show last 20 logs
-        const recentLogs = logs.slice(-20);
+        // Show last 25 logs
+        const recentLogs = logs.slice(-25);
         
         // Only add new logs that haven't been displayed yet
         recentLogs.forEach((log, index) => {
@@ -233,9 +273,9 @@ class WebsiteTester {
                 }, 50);
             });
             
-            // Remove old logs if we have too many (keep performance good)
+            // Remove old logs if we have too many
             const allLogs = logsContainer.children;
-            if (allLogs.length > 25) {
+            if (allLogs.length > 30) {
                 const oldLog = allLogs[0];
                 oldLog.style.opacity = '0';
                 oldLog.style.transform = 'translateY(-10px)';
@@ -248,11 +288,11 @@ class WebsiteTester {
         });
         
         // Clean up displayed logs set if it gets too large
-        if (this.displayedLogs.size > 100) {
-            this.displayedLogs = new Set(Array.from(this.displayedLogs).slice(-50));
+        if (this.displayedLogs.size > 150) {
+            this.displayedLogs = new Set(Array.from(this.displayedLogs).slice(-75));
         }
         
-        // Auto-scroll to bottom with smooth animation only if user hasn't scrolled up
+        // Auto-scroll to bottom
         const isScrolledToBottom = logsContainer.scrollTop + logsContainer.clientHeight >= logsContainer.scrollHeight - 10;
         
         if (isScrolledToBottom) {
@@ -265,32 +305,55 @@ class WebsiteTester {
         }
     }
     
-    displayResults(results) {
+    displayComprehensiveResults(results) {
         const { summary, issues } = results;
         
-        // Animate counters
+        // Animate all counters
         this.animateCounter('totalPages', summary.totalPages);
         this.animateCounter('brokenLinks', summary.brokenLinksCount);
         this.animateCounter('brokenButtons', summary.brokenButtonsCount);
-        this.animateCounter('authIssues', summary.authIssuesCount);
+        this.animateCounter('seoIssues', summary.seoIssuesCount || 0);
+        this.animateCounter('performanceIssues', summary.performanceIssuesCount || 0);
+        this.animateCounter('formsTested', summary.formsTestedCount || 0);
+        this.animateCounter('resourcesTested', summary.resourcesTestedCount || 0);
         
-        // Create chart with animation
-        setTimeout(() => this.createChart(summary), 500);
+        // Calculate total issues
+        const totalIssues = summary.brokenLinksCount + summary.brokenButtonsCount + 
+                           summary.authIssuesCount + (summary.seoIssuesCount || 0) + 
+                           (summary.performanceIssuesCount || 0);
+        this.animateCounter('totalIssues', totalIssues);
         
-        // Display issues with staggered animations
-        setTimeout(() => this.displayBrokenLinks(issues.brokenLinks), 600);
-        setTimeout(() => this.displayBrokenButtons(issues.brokenButtons), 700);
-        setTimeout(() => this.displayAuthIssues(issues.authErrors), 800);
+        // Display performance metrics
+        if (summary.averagePageSize) {
+            document.getElementById('avgPageSize').textContent = summary.averagePageSize + 'KB';
+        }
+        if (summary.averageFCP) {
+            document.getElementById('avgFCP').textContent = summary.averageFCP + 'ms';
+        }
+        
+        // Create charts
+        setTimeout(() => this.createIssuesChart(summary), 500);
+        setTimeout(() => this.createPerformanceChart(issues.performanceData || []), 600);
+        
+        // Display detailed results in tabs
+        this.displayBrokenLinks(issues.brokenLinks);
+        this.displayBrokenButtons(issues.brokenButtons);
+        this.displaySEOIssues(issues.seoIssues || []);
+        this.displayPerformanceData(issues.performanceData || []);
+        this.displayFormsData(issues.workingLinks?.filter(l => l.type === 'form') || []);
+        this.displayResourcesData(issues.missingResources || []);
         
         // Store results for download
         this.currentResults = results;
         
-        // Show results section with animation
+        // Show results section
         document.getElementById('resultsSection').classList.remove('hidden');
     }
     
     animateCounter(elementId, targetValue) {
         const element = document.getElementById(elementId);
+        if (!element) return;
+        
         const startValue = 0;
         const duration = 1000;
         const startTime = performance.now();
@@ -314,27 +377,34 @@ class WebsiteTester {
         return 1 - Math.pow(1 - t, 3);
     }
     
-    createChart(summary) {
+    createIssuesChart(summary) {
         const ctx = document.getElementById('issuesChart').getContext('2d');
         
         new Chart(ctx, {
             type: 'doughnut',
             data: {
-                labels: ['Working Links', 'Broken Links', 'Working Buttons', 'Broken Buttons', 'Auth Issues'],
+                labels: [
+                    'Working Links', 'Broken Links', 'Working Buttons', 'Broken Buttons', 
+                    'SEO Issues', 'Performance Issues', 'Auth Issues'
+                ],
                 datasets: [{
                     data: [
                         summary.totalLinks - summary.brokenLinksCount,
                         summary.brokenLinksCount,
                         summary.totalButtons - summary.brokenButtonsCount,
                         summary.brokenButtonsCount,
+                        summary.seoIssuesCount || 0,
+                        summary.performanceIssuesCount || 0,
                         summary.authIssuesCount
                     ],
                     backgroundColor: [
-                        '#10B981', // green
-                        '#EF4444', // red
-                        '#3B82F6', // blue
-                        '#F59E0B', // yellow
-                        '#8B5CF6'  // purple
+                        '#10B981', // green - working links
+                        '#EF4444', // red - broken links
+                        '#3B82F6', // blue - working buttons
+                        '#F59E0B', // yellow - broken buttons
+                        '#8B5CF6', // purple - SEO issues
+                        '#F97316', // orange - performance issues
+                        '#EC4899'  // pink - auth issues
                     ],
                     borderWidth: 0,
                     hoverOffset: 10
@@ -348,17 +418,91 @@ class WebsiteTester {
                         position: 'bottom',
                         labels: {
                             color: '#ffffff',
-                            padding: 20,
+                            padding: 15,
                             usePointStyle: true,
-                            font: {
-                                size: 14
-                            }
+                            font: { size: 12 }
                         }
                     }
                 },
                 animation: {
                     animateRotate: true,
                     duration: 2000
+                }
+            }
+        });
+    }
+    
+    createPerformanceChart(performanceData) {
+        if (!performanceData || performanceData.length === 0) return;
+        
+        const ctx = document.getElementById('performanceChart').getContext('2d');
+        
+        const chartData = performanceData.map((data, index) => ({
+            x: index + 1,
+            y: data.firstContentfulPaint || 0,
+            pageSize: data.pageSize || 0,
+            page: data.page
+        }));
+        
+        new Chart(ctx, {
+            type: 'scatter',
+            data: {
+                datasets: [{
+                    label: 'First Contentful Paint (ms)',
+                    data: chartData,
+                    backgroundColor: function(context) {
+                        const value = context.parsed.y;
+                        if (value > 3000) return '#EF4444'; // red - slow
+                        if (value > 1500) return '#F59E0B'; // orange - medium
+                        return '#10B981'; // green - fast
+                    },
+                    borderColor: '#ffffff',
+                    borderWidth: 1,
+                    pointRadius: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        labels: { color: '#ffffff' }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            title: function(context) {
+                                const point = chartData[context[0].dataIndex];
+                                return point.page;
+                            },
+                            label: function(context) {
+                                const point = chartData[context.dataIndex];
+                                return [
+                                    `FCP: ${point.y}ms`,
+                                    `Page Size: ${point.pageSize}KB`
+                                ];
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Page Number',
+                            color: '#ffffff'
+                        },
+                        ticks: { color: '#ffffff' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'First Contentful Paint (ms)',
+                            color: '#ffffff'
+                        },
+                        ticks: { color: '#ffffff' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    }
                 }
             }
         });
@@ -378,31 +522,32 @@ class WebsiteTester {
             return;
         }
         
-        container.innerHTML = brokenLinks.slice(0, 10).map((link, index) => `
-            <div class="bg-red-500/10 border border-red-500/20 rounded-xl p-4 hover:bg-red-500/20 transition-all duration-300" style="animation-delay: ${index * 100}ms;">
+        container.innerHTML = brokenLinks.slice(0, 20).map((link, index) => `
+            <div class="bg-red-500/10 border border-red-500/20 rounded-xl p-4 hover:bg-red-500/20 transition-all duration-300" style="animation-delay: ${index * 50}ms;">
                 <div class="flex items-start gap-3">
                     <i class="fas fa-unlink text-red-400 mt-1"></i>
                     <div class="flex-1 min-w-0">
                         <p class="font-medium text-red-300 break-all">${link.link}</p>
                         <p class="text-sm text-gray-400 mt-1">
                             <i class="fas fa-exclamation-triangle text-yellow-400 mr-1"></i>
-                            Status: ${link.status} • Found on: ${link.page}
+                            Status: ${link.status} ${link.type ? `• Type: ${link.type}` : ''} • Found on: ${link.page}
                         </p>
+                        ${link.error ? `<p class="text-xs text-red-400 mt-1">Error: ${link.error}</p>` : ''}
                     </div>
                 </div>
             </div>
         `).join('');
         
-        if (brokenLinks.length > 10) {
+        if (brokenLinks.length > 20) {
             container.innerHTML += `
                 <div class="text-center py-4">
-                    <p class="text-gray-400">... and ${brokenLinks.length - 10} more broken links</p>
+                    <p class="text-gray-400">... and ${brokenLinks.length - 20} more broken links</p>
                 </div>
             `;
         }
     }
     
-     displayBrokenButtons(brokenButtons) {
+    displayBrokenButtons(brokenButtons) {
         const container = document.getElementById('brokenButtonsList');
         
         if (brokenButtons.length === 0) {
@@ -410,114 +555,347 @@ class WebsiteTester {
                 <div class="text-center py-8">
                     <i class="fas fa-check-circle text-6xl text-green-400 mb-4"></i>
                     <p class="text-xl text-green-400 font-semibold">No broken buttons found!</p>
-                    <p class="text-gray-400">All buttons are functioning correctly.</p>
+                    <p class="text-gray-400">All interactive elements are functioning correctly.</p>
                 </div>
-        `;
-           return;
-       }
-       
-       container.innerHTML = brokenButtons.slice(0, 10).map((btn, index) => `
-           <div class="bg-orange-500/10 border border-orange-500/20 rounded-xl p-4 hover:bg-orange-500/20 transition-all duration-300" style="animation-delay: ${index * 100}ms;">
-               <div class="flex items-start gap-3">
-                   <i class="fas fa-exclamation-triangle text-orange-400 mt-1"></i>
-                   <div class="flex-1 min-w-0">
-                       <p class="font-medium text-orange-300">"${btn.button}"</p>
-                       <p class="text-sm text-gray-400 mt-1">
-                           <i class="fas fa-map-marker-alt text-blue-400 mr-1"></i>
-                           Page: ${btn.page}
-                       </p>
-                       <p class="text-sm text-red-400 mt-1">
-                           <i class="fas fa-bug text-red-400 mr-1"></i>
-                           Error: ${btn.errors[0]}
-                       </p>
-                   </div>
-               </div>
-           </div>
-       `).join('');
-       
-       if (brokenButtons.length > 10) {
-           container.innerHTML += `
-               <div class="text-center py-4">
-                   <p class="text-gray-400">... and ${brokenButtons.length - 10} more broken buttons</p>
-               </div>
-           `;
-       }
-   }
+            `;
+            return;
+        }
+        
+        container.innerHTML = brokenButtons.slice(0, 15).map((btn, index) => `
+            <div class="bg-orange-500/10 border border-orange-500/20 rounded-xl p-4 hover:bg-orange-500/20 transition-all duration-300" style="animation-delay: ${index * 50}ms;">
+                <div class="flex items-start gap-3">
+                    <i class="fas fa-exclamation-triangle text-orange-400 mt-1"></i>
+                    <div class="flex-1 min-w-0">
+                        <p class="font-medium text-orange-300">"${btn.button}"</p>
+                        <p class="text-sm text-gray-400 mt-1">
+                            <i class="fas fa-map-marker-alt text-blue-400 mr-1"></i>
+                            Page: ${btn.page}
+                        </p>
+                        <p class="text-sm text-red-400 mt-1">
+                            <i class="fas fa-bug text-red-400 mr-1"></i>
+                            Error: ${btn.errors[0]}
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
     
-   displayAuthIssues(authErrors) {
-       const container = document.getElementById('authIssuesList');
-       
-       if (authErrors.length === 0) {
-           container.innerHTML = `
-               <div class="text-center py-8">
-                   <i class="fas fa-shield-check text-6xl text-green-400 mb-4"></i>
-                   <p class="text-xl text-green-400 font-semibold">No authentication issues found!</p>
-                   <p class="text-gray-400">All authentication flows are working properly.</p>
-               </div>
-           `;
-           return;
-       }
-       
-       // Group by page
-       const groupedByPage = {};
-       authErrors.forEach(auth => {
-           if (!groupedByPage[auth.page]) {
-               groupedByPage[auth.page] = [];
-           }
-           groupedByPage[auth.page].push(auth);
-       });
-       
-       container.innerHTML = Object.entries(groupedByPage).slice(0, 5).map(([page, auths], index) => `
-           <div class="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-4 hover:bg-yellow-500/20 transition-all duration-300" style="animation-delay: ${index * 100}ms;">
-               <div class="flex items-start gap-3">
-                   <i class="fas fa-key text-yellow-400 mt-1"></i>
-                   <div class="flex-1 min-w-0">
-                       <p class="font-medium text-yellow-300 break-all">${page}</p>
-                       <p class="text-sm text-gray-400 mt-1">
-                           <i class="fas fa-users text-blue-400 mr-1"></i>
-                           ${auths.length} buttons with authentication issues
-                       </p>
-                       <div class="mt-2 p-3 bg-yellow-500/10 rounded-lg">
-                           <p class="text-sm text-yellow-300">
-                               <i class="fas fa-lightbulb text-yellow-400 mr-1"></i>
-                               <strong>Recommendation:</strong> Implement graceful auth error handling and redirect users to login page
-                           </p>
-                       </div>
-                   </div>
-               </div>
-           </div>
-       `).join('');
-   }
-   
-   downloadReport() {
-       if (!this.currentResults) {
-           this.showNotification('No report available to download', 'error');
-           return;
-       }
-       
-       // Add timestamp and metadata to report
-       const enhancedReport = {
-           ...this.currentResults,
-           metadata: {
-               generatedAt: new Date().toISOString(),
-               tool: 'WebScan Pro',
-               version: '1.0.0'
-           }
-       };
-       
-       const dataStr = JSON.stringify(enhancedReport, null, 2);
-       const dataBlob = new Blob([dataStr], { type: 'application/json' });
-       
-       const link = document.createElement('a');
-       link.href = URL.createObjectURL(dataBlob);
-       link.download = `webscan-pro-report-${new Date().toISOString().split('T')[0]}.json`;
-       link.click();
-       
-       this.showNotification('Report downloaded successfully!', 'success');
-   }
+    displaySEOIssues(seoIssues) {
+        const container = document.getElementById('seoIssuesList');
+        
+        if (seoIssues.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-8">
+                    <i class="fas fa-trophy text-6xl text-green-400 mb-4"></i>
+                    <p class="text-xl text-green-400 font-semibold">Excellent SEO!</p>
+                    <p class="text-gray-400">No major SEO issues found across scanned pages.</p>
+                </div>
+            `;
+            return;
+        }
+        
+        container.innerHTML = seoIssues.slice(0, 15).map((seo, index) => `
+            <div class="bg-green-500/10 border border-green-500/20 rounded-xl p-4 hover:bg-green-500/20 transition-all duration-300" style="animation-delay: ${index * 50}ms;">
+                <div class="flex items-start gap-3">
+                    <i class="fas fa-search text-green-400 mt-1"></i>
+                    <div class="flex-1 min-w-0">
+                        <p class="font-medium text-green-300 break-all">${seo.page}</p>
+                        <div class="mt-2 space-y-1">
+                            ${seo.issues.map(issue => `
+                                <p class="text-sm text-yellow-400 flex items-center gap-2">
+                                    <i class="fas fa-exclamation-triangle text-xs"></i>
+                                    ${issue}
+                                </p>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+    
+    displayPerformanceData(performanceData) {
+        const container = document.getElementById('performanceList');
+        
+        if (performanceData.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-8">
+                    <i class="fas fa-clock text-6xl text-gray-400 mb-4"></i>
+                    <p class="text-xl text-gray-400 font-semibold">No performance data</p>
+                    <p class="text-gray-500">Performance monitoring was not enabled for this scan.</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Sort by performance (slowest first)
+        const sortedData = performanceData.sort((a, b) => (b.firstContentfulPaint || 0) - (a.firstContentfulPaint || 0));
+        
+        container.innerHTML = sortedData.slice(0, 15).map((perf, index) => {
+            const fcp = perf.firstContentfulPaint || 0;
+            const isSlowLoading = fcp > 3000;
+            const isLargeDOM = perf.totalElements > 1500;
+            const isLargePage = perf.pageSize > 2000;
+            
+            return `
+                <div class="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-4 hover:bg-yellow-500/20 transition-all duration-300" style="animation-delay: ${index * 50}ms;">
+                    <div class="flex items-start gap-3">
+                        <i class="fas fa-tachometer-alt text-yellow-400 mt-1"></i>
+                        <div class="flex-1 min-w-0">
+                            <p class="font-medium text-yellow-300 break-all">${perf.page}</p>
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-3 text-sm">
+                                <div class="bg-black/20 rounded-lg p-2">
+                                    <p class="text-gray-400 text-xs">First Paint</p>
+                                    <p class="text-white font-semibold ${isSlowLoading ? 'text-red-400' : 'text-green-400'}">${Math.round(fcp)}ms</p>
+                                </div>
+                                <div class="bg-black/20 rounded-lg p-2">
+                                    <p class="text-gray-400 text-xs">DOM Size</p>
+                                    <p class="text-white font-semibold ${isLargeDOM ? 'text-red-400' : 'text-green-400'}">${perf.totalElements} elements</p>
+                                </div>
+                                <div class="bg-black/20 rounded-lg p-2">
+                                    <p class="text-gray-400 text-xs">Page Size</p>
+                                    <p class="text-white font-semibold ${isLargePage ? 'text-red-400' : 'text-green-400'}">${perf.pageSize || 0}KB</p>
+                                </div>
+                                <div class="bg-black/20 rounded-lg p-2">
+                                    <p class="text-gray-400 text-xs">Images</p>
+                                    <p class="text-white font-semibold">${perf.totalImages || 0}</p>
+                                </div>
+                            </div>
+                            ${(isSlowLoading || isLargeDOM || isLargePage) ? `
+                                <div class="mt-3 p-3 bg-yellow-500/10 rounded-lg">
+                                    <p class="text-sm text-yellow-300">
+                                        <i class="fas fa-lightbulb text-yellow-400 mr-1"></i>
+                                        <strong>Recommendations:</strong> 
+                                        ${isSlowLoading ? 'Optimize loading speed. ' : ''}
+                                        ${isLargeDOM ? 'Reduce DOM complexity. ' : ''}
+                                        ${isLargePage ? 'Compress images and assets. ' : ''}
+                                    </p>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+    
+    displayFormsData(formsData) {
+        const container = document.getElementById('formsList');
+        
+        if (formsData.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-8">
+                    <i class="fas fa-file-text text-6xl text-gray-400 mb-4"></i>
+                    <p class="text-xl text-gray-400 font-semibold">No forms detected</p>
+                    <p class="text-gray-500">No forms were found during the scan.</p>
+                </div>
+            `;
+            return;
+        }
+        
+        container.innerHTML = formsData.slice(0, 10).map((form, index) => `
+            <div class="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 hover:bg-blue-500/20 transition-all duration-300" style="animation-delay: ${index * 50}ms;">
+                <div class="flex items-start gap-3">
+                    <i class="fas fa-file-text text-blue-400 mt-1"></i>
+                    <div class="flex-1 min-w-0">
+                        <p class="font-medium text-blue-300 break-all">${form.link}</p>
+                        <p class="text-sm text-gray-400 mt-1">
+                            <i class="fas fa-map-marker-alt text-blue-400 mr-1"></i>
+                            Found on: ${form.page}
+                        </p>
+                        <div class="mt-2 p-3 bg-blue-500/10 rounded-lg">
+                            <p class="text-sm text-blue-300">
+                                <i class="fas fa-check-circle text-green-400 mr-1"></i>
+                                Form endpoint is accessible and responding correctly
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+    
+    displayResourcesData(resourcesData) {
+        const container = document.getElementById('resourcesList');
+        
+        if (resourcesData.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-8">
+                    <i class="fas fa-check-circle text-6xl text-green-400 mb-4"></i>
+                    <p class="text-xl text-green-400 font-semibold">All resources loading correctly!</p>
+                    <p class="text-gray-400">No missing CSS, JavaScript, or image resources found.</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Group by type
+        const groupedResources = resourcesData.reduce((acc, resource) => {
+            const type = resource.type || 'unknown';
+            if (!acc[type]) acc[type] = [];
+            acc[type].push(resource);
+            return acc;
+        }, {});
+        
+        let html = '';
+        Object.entries(groupedResources).forEach(([type, resources], groupIndex) => {
+            const typeIcon = {
+                'css': 'fab fa-css3-alt',
+                'js': 'fab fa-js-square', 
+                'image': 'fas fa-image',
+                'unknown': 'fas fa-file'
+            }[type] || 'fas fa-file';
+            
+            const typeColor = {
+                'css': 'text-blue-400',
+                'js': 'text-yellow-400',
+                'image': 'text-green-400', 
+                'unknown': 'text-gray-400'
+            }[type] || 'text-gray-400';
+            
+            html += `
+                <div class="mb-6">
+                    <h4 class="text-lg font-semibold ${typeColor} mb-3 flex items-center gap-2">
+                        <i class="${typeIcon}"></i>
+                        ${type.toUpperCase()} Resources (${resources.length})
+                    </h4>
+                    <div class="space-y-2">
+            `;
+            
+            resources.slice(0, 10).forEach((resource, index) => {
+                html += `
+                    <div class="bg-indigo-500/10 border border-indigo-500/20 rounded-lg p-3 hover:bg-indigo-500/20 transition-all duration-300" style="animation-delay: ${(groupIndex * 10 + index) * 30}ms;">
+                        <div class="flex items-start gap-3">
+                            <i class="fas fa-times-circle text-red-400 mt-1"></i>
+                            <div class="flex-1 min-w-0">
+                                <p class="font-medium text-indigo-300 break-all text-sm">${resource.resource}</p>
+                                <p class="text-xs text-gray-400 mt-1">
+                                    Status: ${resource.status} • Found on: ${resource.page}
+                                </p>
+                                ${resource.error ? `<p class="text-xs text-red-400 mt-1">Error: ${resource.error}</p>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            if (resources.length > 10) {
+                html += `
+                    <div class="text-center py-2">
+                        <p class="text-gray-400 text-sm">... and ${resources.length - 10} more ${type} resources</p>
+                    </div>
+                `;
+            }
+            
+            html += `
+                    </div>
+                </div>
+            `;
+        });
+        
+        container.innerHTML = html;
+    }
+    
+    downloadReport() {
+        if (!this.currentResults) {
+            this.showNotification('No report available to download', 'error');
+            return;
+        }
+        
+        // Enhanced report with metadata
+        const enhancedReport = {
+            ...this.currentResults,
+            metadata: {
+                generatedAt: new Date().toISOString(),
+                tool: 'WebScan - Pro Edition',
+                version: '2.0.0',
+                scanType: 'comprehensive',
+                features: [
+                    'Link Testing', 'Button Testing', 'Form Analysis', 
+                    'Performance Monitoring', 'SEO Analysis', 'Resource Testing'
+                ]
+            }
+        };
+        
+        const dataStr = JSON.stringify(enhancedReport, null, 2);
+        const dataBlob = new Blob([dataStr], { type: 'application/json' });
+        
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(dataBlob);
+        link.download = `webscan-pro-comprehensive-report-${new Date().toISOString().split('T')[0]}.json`;
+        link.click();
+        
+        this.showNotification('Report downloaded successfully!', 'success');
+    }
+    
+    downloadCSV() {
+        if (!this.currentResults) {
+            this.showNotification('No data available to export', 'error');
+            return;
+        }
+        
+        const { summary, issues } = this.currentResults;
+        
+        // Create CSV summary
+        let csvContent = "data:text/csv;charset=utf-8,";
+        
+        // Summary section
+        csvContent += "COMPREHENSIVE SCAN SUMMARY\n";
+        csvContent += "Metric,Value\n";
+        csvContent += `Total Pages Scanned,${summary.totalPages}\n`;
+        csvContent += `Total Links Tested,${summary.totalLinks}\n`;
+        csvContent += `Broken Links,${summary.brokenLinksCount}\n`;
+        csvContent += `Total Buttons Tested,${summary.totalButtons}\n`;
+        csvContent += `Broken Buttons,${summary.brokenButtonsCount}\n`;
+        csvContent += `SEO Issues,${summary.seoIssuesCount || 0}\n`;
+        csvContent += `Performance Issues,${summary.performanceIssuesCount || 0}\n`;
+        csvContent += `Forms Tested,${summary.formsTestedCount || 0}\n`;
+        csvContent += `Resources Tested,${summary.resourcesTestedCount || 0}\n`;
+        csvContent += `Average Page Size (KB),${summary.averagePageSize || 0}\n`;
+        csvContent += `Average First Contentful Paint (ms),${summary.averageFCP || 0}\n`;
+        csvContent += "\n";
+        
+        // Broken links section
+        if (issues.brokenLinks && issues.brokenLinks.length > 0) {
+            csvContent += "BROKEN LINKS DETAILS\n";
+            csvContent += "Page,Link,Status,Error,Type\n";
+            issues.brokenLinks.forEach(link => {
+                csvContent += `"${link.page}","${link.link}","${link.status}","${link.error || ''}","${link.type || 'link'}"\n`;
+            });
+            csvContent += "\n";
+        }
+        
+        // Performance data section
+        if (issues.performanceData && issues.performanceData.length > 0) {
+            csvContent += "PERFORMANCE DATA\n";
+            csvContent += "Page,First Contentful Paint (ms),DOM Elements,Page Size (KB),Total Images\n";
+            issues.performanceData.forEach(perf => {
+                csvContent += `"${perf.page}","${perf.firstContentfulPaint || 0}","${perf.totalElements || 0}","${perf.pageSize || 0}","${perf.totalImages || 0}"\n`;
+            });
+            csvContent += "\n";
+        }
+        
+        // SEO issues section
+        if (issues.seoIssues && issues.seoIssues.length > 0) {
+            csvContent += "SEO ISSUES\n";
+            csvContent += "Page,Issues\n";
+            issues.seoIssues.forEach(seo => {
+                csvContent += `"${seo.page}","${seo.issues.join('; ')}"\n`;
+            });
+        }
+        
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement('a');
+        link.setAttribute('href', encodedUri);
+        link.setAttribute('download', `webscan-pro-summary-${new Date().toISOString().split('T')[0]}.csv`);
+        link.click();
+        
+        this.showNotification('CSV summary downloaded successfully!', 'success');
+    }
 }
 
 // Initialize the application
 document.addEventListener('DOMContentLoaded', () => {
-   new WebsiteTester();
+    new ComprehensiveWebsiteTester();
 });

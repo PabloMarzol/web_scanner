@@ -1,10 +1,9 @@
-<!-- public/index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebScanner - Website Testing Tool</title>
+    <title>WebScanner - Website Analysis</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/chart.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
@@ -82,25 +81,19 @@
             scrollbar-width: thin;
             scrollbar-color: rgba(107, 114, 128, 0.5) transparent;
         }
-
         .scrollbar-thin::-webkit-scrollbar {
             width: 6px;
         }
-
         .scrollbar-thin::-webkit-scrollbar-track {
             background: transparent;
         }
-
         .scrollbar-thin::-webkit-scrollbar-thumb {
             background-color: rgba(107, 114, 128, 0.5);
             border-radius: 3px;
         }
-
         .scrollbar-thin::-webkit-scrollbar-thumb:hover {
             background-color: rgba(107, 114, 128, 0.8);
         }
-
-        /* Pulse animation for loading */
         @keyframes pulse-glow {
             0%, 100% {
                 box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
@@ -109,7 +102,6 @@
                 box-shadow: 0 0 30px rgba(59, 130, 246, 0.8);
             }
         }
-
         .pulse-glow {
             animation: pulse-glow 2s ease-in-out infinite;
         }
@@ -124,7 +116,7 @@
     </div>
 
     <div class="relative z-10 container mx-auto px-4 py-8">
-        <div class="max-w-6xl mx-auto">
+        <div class="max-w-7xl mx-auto">
             <!-- Header -->
             <div class="text-center mb-12 animate-fade-in">
                 <div class="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-r from-blue-500 to-purple-600 rounded-3xl mb-6 animate-float">
@@ -133,8 +125,8 @@
                 <h1 class="text-6xl font-bold mb-4 gradient-text">
                     WebScan Pro
                 </h1>
-                <p class="text-xl text-gray-300 max-w-2xl mx-auto">
-                     Website testing tool. Scan any website for broken links, buttons, and performance issues with real-time analytics.
+                <p class="text-xl text-gray-300 max-w-3xl mx-auto">
+                    Website analysis tool. Scan for broken links, buttons, performance issues, SEO problems, and accessibility concerns with real-time analytics.
                 </p>
             </div>
             
@@ -158,12 +150,12 @@
                         class="px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-2xl hover:from-blue-700 hover:to-purple-700 transition-all duration-300 font-semibold flex items-center gap-2 glow group"
                     >
                         <i class="fas fa-rocket group-hover:animate-pulse"></i>
-                        Start Scan
+                        Start Deep Scan
                     </button>
                 </div>
                 <p class="text-sm text-gray-400 mt-4 flex items-center gap-2">
                     <i class="fas fa-info-circle"></i>
-                    Enter the full URL of the website you want to test (including http:// or https://)
+                    Scan includes: links, buttons, forms, performance, SEO, and accessibility testing
                 </p>
             </div>
             
@@ -174,7 +166,7 @@
                         <div class="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center animate-pulse-slow">
                             <i class="fas fa-cog animate-spin text-white text-sm"></i>
                         </div>
-                        Scanning Website...
+                         Scanning Website...
                     </h2>
                     <div class="text-right">
                         <span id="progressPercent" class="text-3xl font-bold text-blue-400">0%</span>
@@ -198,7 +190,7 @@
                 <div class="bg-black/50 rounded-2xl p-6 backdrop-blur-sm border border-white/10">
                     <h3 class="text-white font-semibold mb-4 flex items-center gap-2">
                         <i class="fas fa-terminal text-green-400"></i>
-                        Scan Logs
+                        Live Scan Progress
                     </h3>
                     <div id="realTimeLogs" class="text-sm font-mono space-y-1 h-64 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-transparent"></div>
                 </div>
@@ -206,7 +198,7 @@
             
             <!-- Results Section -->
             <div id="resultsSection" class="hidden">
-                <!-- Summary Cards -->
+                <!-- Primary Summary Cards -->
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                     <div class="glass rounded-2xl p-6 floating-card group animate-slide-up">
                         <div class="flex items-center justify-between">
@@ -247,66 +239,206 @@
                     <div class="glass rounded-2xl p-6 floating-card group animate-slide-up" style="animation-delay: 0.3s;">
                         <div class="flex items-center justify-between">
                             <div>
-                                <p class="text-gray-400 text-sm mb-1">Auth Issues</p>
-                                <p id="authIssues" class="text-3xl font-bold text-yellow-400">0</p>
+                                <p class="text-gray-400 text-sm mb-1">Total Issues</p>
+                                <p id="totalIssues" class="text-3xl font-bold text-purple-400">0</p>
                             </div>
-                            <div class="w-12 h-12 bg-yellow-500/20 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
-                                <i class="fas fa-shield-alt text-2xl text-yellow-400"></i>
+                            <div class="w-12 h-12 bg-purple-500/20 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                                <i class="fas fa-exclamation-triangle text-2xl text-purple-400"></i>
                             </div>
                         </div>
                     </div>
                 </div>
-                
-                <!-- Chart Section -->
-                <div class="glass rounded-3xl p-8 mb-8 floating-card animate-slide-up" style="animation-delay: 0.4s;">
-                    <h3 class="text-2xl font-bold text-white mb-6 flex items-center gap-3">
-                        <i class="fas fa-chart-pie text-purple-400"></i>
-                        Issues Overview
-                    </h3>
-                    <div class="relative h-96">
-                        <canvas id="issuesChart"></canvas>
+
+                <!-- Secondary Metrics Grid -->
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
+                    <!-- SEO Issues -->
+                    <div class="glass rounded-xl p-4 floating-card group animate-slide-up" style="animation-delay: 0.4s;">
+                        <div class="text-center">
+                            <div class="w-10 h-10 bg-green-500/20 rounded-lg flex items-center justify-center mx-auto mb-2 group-hover:scale-110 transition-transform">
+                                <i class="fas fa-search text-green-400"></i>
+                            </div>
+                            <p class="text-gray-400 text-xs mb-1">SEO Issues</p>
+                            <p id="seoIssues" class="text-xl font-bold text-green-400">0</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Performance Issues -->
+                    <div class="glass rounded-xl p-4 floating-card group animate-slide-up" style="animation-delay: 0.5s;">
+                        <div class="text-center">
+                            <div class="w-10 h-10 bg-yellow-500/20 rounded-lg flex items-center justify-center mx-auto mb-2 group-hover:scale-110 transition-transform">
+                                <i class="fas fa-tachometer-alt text-yellow-400"></i>
+                            </div>
+                            <p class="text-gray-400 text-xs mb-1">Slow Pages</p>
+                            <p id="performanceIssues" class="text-xl font-bold text-yellow-400">0</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Forms Tested -->
+                    <div class="glass rounded-xl p-4 floating-card group animate-slide-up" style="animation-delay: 0.6s;">
+                        <div class="text-center">
+                            <div class="w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center mx-auto mb-2 group-hover:scale-110 transition-transform">
+                                <i class="fas fa-file-text text-blue-400"></i>
+                            </div>
+                            <p class="text-gray-400 text-xs mb-1">Forms</p>
+                            <p id="formsTested" class="text-xl font-bold text-blue-400">0</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Resources Tested -->
+                    <div class="glass rounded-xl p-4 floating-card group animate-slide-up" style="animation-delay: 0.7s;">
+                        <div class="text-center">
+                            <div class="w-10 h-10 bg-indigo-500/20 rounded-lg flex items-center justify-center mx-auto mb-2 group-hover:scale-110 transition-transform">
+                                <i class="fas fa-cubes text-indigo-400"></i>
+                            </div>
+                            <p class="text-gray-400 text-xs mb-1">Resources</p>
+                            <p id="resourcesTested" class="text-xl font-bold text-indigo-400">0</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Average Page Size -->
+                    <div class="glass rounded-xl p-4 floating-card group animate-slide-up" style="animation-delay: 0.8s;">
+                        <div class="text-center">
+                            <div class="w-10 h-10 bg-pink-500/20 rounded-lg flex items-center justify-center mx-auto mb-2 group-hover:scale-110 transition-transform">
+                                <i class="fas fa-weight text-pink-400"></i>
+                            </div>
+                            <p class="text-gray-400 text-xs mb-1">Avg Size</p>
+                            <p id="avgPageSize" class="text-xl font-bold text-pink-400">0KB</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Average Load Time -->
+                    <div class="glass rounded-xl p-4 floating-card group animate-slide-up" style="animation-delay: 0.9s;">
+                        <div class="text-center">
+                            <div class="w-10 h-10 bg-cyan-500/20 rounded-lg flex items-center justify-center mx-auto mb-2 group-hover:scale-110 transition-transform">
+                                <i class="fas fa-stopwatch text-cyan-400"></i>
+                            </div>
+                            <p class="text-gray-400 text-xs mb-1">Avg FCP</p>
+                            <p id="avgFCP" class="text-xl font-bold text-cyan-400">0ms</p>
+                        </div>
                     </div>
                 </div>
                 
-                <!-- Detailed Results -->
-                <div class="space-y-6">
-                    <!-- Broken Links -->
-                    <div class="glass rounded-3xl p-8 floating-card animate-slide-up" style="animation-delay: 0.5s;">
-                        <h3 class="text-2xl font-bold text-red-400 mb-6 flex items-center gap-3">
-                            <i class="fas fa-unlink"></i>
-                            Broken Links
-                        </h3>
-                        <div id="brokenLinksList" class="space-y-4"></div>
-                    </div>
-                    
-                    <!-- Broken Buttons -->
-                    <div class="glass rounded-3xl p-8 floating-card animate-slide-up" style="animation-delay: 0.6s;">
-                        <h3 class="text-2xl font-bold text-orange-400 mb-6 flex items-center gap-3">
-                            <i class="fas fa-exclamation-triangle"></i>
-                            Broken Buttons
-                        </h3>
-                        <div id="brokenButtonsList" class="space-y-4"></div>
-                    </div>
-                    
-                    <!-- Auth Issues -->
-                    <div class="glass rounded-3xl p-8 floating-card animate-slide-up" style="animation-delay: 0.7s;">
-                        <h3 class="text-2xl font-bold text-yellow-400 mb-6 flex items-center gap-3">
-                            <i class="fas fa-key"></i>
-                            Authentication Issues
-                        </h3>
-                        <div id="authIssuesList" class="space-y-4"></div>
-                    </div>
-                    
-                    <!-- Export Section -->
-                    <div class="glass rounded-3xl p-8 floating-card animate-slide-up" style="animation-delay: 0.8s;">
+                <!-- Charts Section -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                    <!-- Issues Overview Chart -->
+                    <div class="glass rounded-3xl p-8 floating-card animate-slide-up" style="animation-delay: 1.0s;">
                         <h3 class="text-2xl font-bold text-white mb-6 flex items-center gap-3">
-                            <i class="fas fa-download text-green-400"></i>
-                            Export Report
+                            <i class="fas fa-chart-pie text-purple-400"></i>
+                            Issues Overview
                         </h3>
-                        <p class="text-gray-400 mb-6">Download a report with all findings and recommendations.</p>
+                        <div class="relative h-80">
+                            <canvas id="issuesChart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <!-- Performance Chart -->
+                    <div class="glass rounded-3xl p-8 floating-card animate-slide-up" style="animation-delay: 1.1s;">
+                        <h3 class="text-2xl font-bold text-white mb-6 flex items-center gap-3">
+                            <i class="fas fa-chart-line text-yellow-400"></i>
+                            Performance Distribution
+                        </h3>
+                        <div class="relative h-80">
+                            <canvas id="performanceChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Detailed Results Tabs -->
+                <div class="glass rounded-3xl p-8 floating-card animate-slide-up" style="animation-delay: 1.2s;">
+                    <div class="flex flex-wrap gap-2 mb-6 border-b border-white/10 pb-4">
+                        <button class="tab-button active px-6 py-3 rounded-xl bg-blue-500/20 text-blue-400 border border-blue-500/30 transition-all" data-tab="links">
+                            <i class="fas fa-link mr-2"></i>Links
+                        </button>
+                        <button class="tab-button px-6 py-3 rounded-xl bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10 transition-all" data-tab="buttons">
+                            <i class="fas fa-hand-pointer mr-2"></i>Buttons
+                        </button>
+                        <button class="tab-button px-6 py-3 rounded-xl bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10 transition-all" data-tab="seo">
+                            <i class="fas fa-search mr-2"></i>SEO
+                        </button>
+                        <button class="tab-button px-6 py-3 rounded-xl bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10 transition-all" data-tab="performance">
+                            <i class="fas fa-tachometer-alt mr-2"></i>Performance
+                        </button>
+                        <button class="tab-button px-6 py-3 rounded-xl bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10 transition-all" data-tab="forms">
+                            <i class="fas fa-file-text mr-2"></i>Forms
+                        </button>
+                        <button class="tab-button px-6 py-3 rounded-xl bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10 transition-all" data-tab="resources">
+                            <i class="fas fa-cubes mr-2"></i>Resources
+                        </button>
+                    </div>
+                    
+                    <!-- Tab Content -->
+                    <div id="tabContent">
+                        <!-- Links Tab -->
+                        <div id="linksTab" class="tab-content">
+                            <h3 class="text-2xl font-bold text-red-400 mb-6 flex items-center gap-3">
+                                <i class="fas fa-unlink"></i>
+                                Broken Links Analysis
+                            </h3>
+                            <div id="brokenLinksList" class="space-y-4"></div>
+                        </div>
+                        
+                        <!-- Buttons Tab -->
+                        <div id="buttonsTab" class="tab-content hidden">
+                            <h3 class="text-2xl font-bold text-orange-400 mb-6 flex items-center gap-3">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                Interactive Elements Analysis
+                            </h3>
+                            <div id="brokenButtonsList" class="space-y-4"></div>
+                        </div>
+                        
+                        <!-- SEO Tab -->
+                        <div id="seoTab" class="tab-content hidden">
+                            <h3 class="text-2xl font-bold text-green-400 mb-6 flex items-center gap-3">
+                                <i class="fas fa-search"></i>
+                                SEO & Accessibility Analysis
+                            </h3>
+                            <div id="seoIssuesList" class="space-y-4"></div>
+                        </div>
+                        
+                        <!-- Performance Tab -->
+                        <div id="performanceTab" class="tab-content hidden">
+                            <h3 class="text-2xl font-bold text-yellow-400 mb-6 flex items-center gap-3">
+                                <i class="fas fa-tachometer-alt"></i>
+                                Performance Analysis
+                            </h3>
+                            <div id="performanceList" class="space-y-4"></div>
+                        </div>
+                        
+                        <!-- Forms Tab -->
+                        <div id="formsTab" class="tab-content hidden">
+                            <h3 class="text-2xl font-bold text-blue-400 mb-6 flex items-center gap-3">
+                                <i class="fas fa-file-text"></i>
+                                Forms Analysis
+                            </h3>
+                            <div id="formsList" class="space-y-4"></div>
+                        </div>
+                        
+                        <!-- Resources Tab -->
+                        <div id="resourcesTab" class="tab-content hidden">
+                            <h3 class="text-2xl font-bold text-indigo-400 mb-6 flex items-center gap-3">
+                                <i class="fas fa-cubes"></i>
+                                Resources Analysis
+                            </h3>
+                            <div id="resourcesList" class="space-y-4"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Export Section -->
+                <div class="glass rounded-3xl p-8 floating-card animate-slide-up" style="animation-delay: 1.3s;">
+                    <h3 class="text-2xl font-bold text-white mb-6 flex items-center gap-3">
+                        <i class="fas fa-download text-green-400"></i>
+                        Export Report
+                    </h3>
+                    <p class="text-gray-400 mb-6">Download a complete analysis report with all findings, performance data, and recommendations.</p>
+                    <div class="flex flex-wrap gap-4">
                         <button id="downloadReport" class="px-8 py-4 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-2xl hover:from-green-700 hover:to-emerald-700 transition-all duration-300 font-semibold flex items-center gap-3 glow group">
                             <i class="fas fa-file-download group-hover:animate-bounce"></i>
-                            Download Detailed Report (JSON)
+                            Download JSON Report
+                        </button>
+                        <button id="downloadCSV" class="px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl hover:from-blue-700 hover:to-indigo-700 transition-all duration-300 font-semibold flex items-center gap-3 glow group">
+                            <i class="fas fa-table group-hover:animate-bounce"></i>
+                            Download CSV Summary
                         </button>
                     </div>
                 </div>
@@ -321,7 +453,7 @@
                 <i class="fas fa-search text-white text-2xl animate-spin"></i>
             </div>
             <h3 class="text-xl font-bold text-white mb-2">Initializing Scan</h3>
-            <p class="text-gray-400">Please wait while we prepare the scanner...</p>
+            <p class="text-gray-400">Preparing website analysis...</p>
         </div>
     </div>
     
