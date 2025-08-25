@@ -1,17 +1,30 @@
 {
   "name": "webscan-pro",
   "version": "1.0.0",
+  "description": "Advanced website testing tool",
+  "type": "module",
   "scripts": {
+    "build": "echo 'No build step needed for Vercel'",
     "start": "node serv.js",
-    "build": "echo 'No build needed'"
+    "dev": "node serv.js"
   },
   "dependencies": {
     "@sparticuz/chromium": "^126.0.0",
+    "puppeteer-core": "^22.15.0",
+    "puppeteer": "^22.15.0",
     "cors": "^2.8.5",
-    "express": "^5.1.0",
-    "puppeteer-core": "^22.15.0"
+    "express": "^5.1.0"
   },
   "engines": {
     "node": "20.x"
-  }
+  },
+  "keywords": [
+    "website",
+    "testing",
+    "scanner",
+    "links",
+    "buttons"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
 }

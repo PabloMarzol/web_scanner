@@ -1,13 +1,13 @@
 // server.js
 import express from 'express';
-import puppeteer from 'puppeteer';
+import puppeteer from 'puppeteer-core';  // Changed from 'puppeteer'
+import chromium from '@sparticuz/chromium';  // Added for Render
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-
 
 app.use(cors());
 app.use(express.json());
@@ -58,6 +58,23 @@ app.get('/api/scan/:scanId', (req, res) => {
   res.json(scan);
 });
 
+// ADDED: Also handle query parameter route for frontend compatibility
+app.get('/api/scan', (req, res) => {
+  const { scanId } = req.query;
+  
+  if (!scanId) {
+    return res.status(400).json({ error: 'scanId query parameter is required' });
+  }
+  
+  const scan = activeScans.get(scanId);
+  
+  if (!scan) {
+    return res.status(404).json({ error: 'Scan not found' });
+  }
+  
+  res.json(scan);
+});
+
 async function scanWebsite(baseUrl, scanId) {
   const scan = activeScans.get(scanId);
   
@@ -83,20 +100,64 @@ async function scanWebsite(baseUrl, scanId) {
   try {
     addLog(`🚀 Starting scan for ${baseUrl}`, 'info');
     
-    const browser = await puppeteer.launch({
+    // UPDATED: Browser launch for Render compatibility
+    let browser;
+    
+    if (process.env.NODE_ENV === 'production') {
+      // Production (Render) - use chromium
+      addLog(`📦 Using Render Chromium`, 'info');
+      browser = await puppeteer.launch({
         args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-gpu',
-            '--disable-web-security'
+          ...chromium.args,
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--disable-gpu',
+          '--disable-web-security',
+          '--disable-features=VizDisplayCompositor',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+          '--disable-features=TranslateUI',
+          '--disable-ipc-flooding-protection',
+          '--disable-hang-monitor',
+          '--disable-client-side-phishing-detection',
+          '--disable-component-update',
+          '--disable-default-apps'
         ],
-        executablePath: process.env.NODE_ENV === 'production' 
-            ? await chromium.executablePath()
-            : undefined,
-        headless: "new",
+        defaultViewport: chromium.defaultViewport,
+        executablePath: await chromium.executablePath(),
+        headless: chromium.headless,
+        ignoreHTTPSErrors: true,
         timeout: 60000
-    });
+      });
+    } else {
+      // Local development - use full puppeteer
+      addLog(`💻 Using local Puppeteer (dev mode)`, 'info');
+      const { default: puppeteerFull } = await import('puppeteer');
+      browser = await puppeteerFull.launch({
+        headless: "new",
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--disable-gpu',
+          '--disable-web-security',
+          '--disable-features=VizDisplayCompositor'
+        ],
+        ignoreDefaultArgs: ['--disable-extensions'],
+        timeout: 60000
+      });
+    }
+    
+    addLog(`✅ Browser launched successfully`, 'success');
+    
     const visitedPages = new Set();
     const allIssues = {
       brokenLinks: [],
@@ -224,7 +285,7 @@ async function scanWebsite(baseUrl, scanId) {
             
             let brokenLinksOnPage = 0;
             // Test each link with better error handling
-            for (const link of links.slice(0, 15)) { // Reduced to 15 for stability
+            for (const link of links.slice(0, 15)) { // Keep the original 15 links
             try {
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 10000);
@@ -436,7 +497,7 @@ async function scanWebsite(baseUrl, scanId) {
         }
         
         addLog(`  ✅ Completed: ${fullUrl}`, 'success');
-        }
+    }
     
     // Crawl pages (limit to 10 pages for demo)
     while (pagesToCrawl.length > 0 && visitedPages.size < 10) {
@@ -476,7 +537,7 @@ async function scanWebsite(baseUrl, scanId) {
   }
 }
 
-const port = process.env.PORT || 3001; // Use 3001 locally, Render's port in production
+const port = process.env.PORT || 3001;
 const host = process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost';
 
 const server = app.listen(port, host, () => {
