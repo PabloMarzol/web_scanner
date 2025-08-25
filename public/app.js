@@ -132,7 +132,8 @@ class WebsiteTester {
     async pollForResults() {
         this.pollInterval = setInterval(async () => {
             try {
-                const response = await fetch(`/api/scan?scanId=${this.currentScanId}`); // Updated URL
+                // FIXED: This was the bug - should be `/api/scan/${this.currentScanId}` not query param
+                const response = await fetch(`/api/scan/${this.currentScanId}`);
                 const scan = await response.json();
                 
                 // Update progress with smooth animation

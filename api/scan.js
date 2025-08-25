@@ -1,10 +1,15 @@
 import puppeteer from 'puppeteer-core';
 import chromium from '@sparticuz/chromium';
 
-
+// Store active scans (same as your server.js)
 const activeScans = new Map();
 
 export default async function handler(req, res) {
+  // Add debug logging
+  console.log(`🔍 API Request: ${req.method} ${req.url}`);
+  console.log(`📊 Query params:`, req.query);
+  console.log(`📦 Body:`, req.body);
+  
   // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -14,7 +19,7 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-
+  // POST /api/scan - Start scan (same logic as your server.js)
   if (req.method === 'POST') {
     const { url, scanId } = req.body;
     
@@ -40,7 +45,7 @@ export default async function handler(req, res) {
     
     activeScans.set(scanId, scan);
     
-
+    // Start scanning in background (your exact function)
     scanWebsite(url, scanId).catch(error => {
       console.error('Scan error:', error);
       const failedScan = activeScans.get(scanId);
@@ -53,15 +58,36 @@ export default async function handler(req, res) {
     return res.json({ scanId, status: 'started' });
   }
 
-
+  // GET /api/scan?scanId=xxx - Get scan status 
   if (req.method === 'GET') {
-    const { scanId } = req.query;
+    // Handle both query param (?scanId=xxx) and path param (/xxx) formats
+    let scanId = req.query.scanId;
+    
+    console.log(`🔍 GET request - scanId from query:`, scanId);
+    console.log(`📋 Available scans:`, Array.from(activeScans.keys()));
+    
+    // If no query param, try to extract from URL path
+    if (!scanId && req.url) {
+      const urlParts = req.url.split('/');
+      if (urlParts.length >= 3 && urlParts[1] === 'api' && urlParts[2] === 'scan' && urlParts[3]) {
+        scanId = urlParts[3].split('?')[0]; // Remove any query params
+        console.log(`🔍 GET request - scanId from path:`, scanId);
+      }
+    }
+    
+    if (!scanId) {
+      console.log(`❌ No scanId found in request`);
+      return res.status(400).json({ error: 'scanId is required' });
+    }
+    
     const scan = activeScans.get(scanId);
     
     if (!scan) {
+      console.log(`❌ Scan not found for ID: ${scanId}`);
       return res.status(404).json({ error: 'Scan not found' });
     }
     
+    console.log(`✅ Returning scan status: ${scan.status}, Progress: ${scan.progress}%`);
     return res.json(scan);
   }
 
@@ -70,7 +96,13 @@ export default async function handler(req, res) {
 
 // Your EXACT scanWebsite function from server.js - just changed browser launch for Vercel
 async function scanWebsite(baseUrl, scanId) {
+  console.log(`🚀 scanWebsite called with baseUrl: ${baseUrl}, scanId: ${scanId}`);
   const scan = activeScans.get(scanId);
+  
+  if (!scan) {
+    console.log(`❌ Scan not found in activeScans for ID: ${scanId}`);
+    return;
+  }
   
   // Add logs array to store real-time updates
   scan.logs = [];
@@ -96,11 +128,16 @@ async function scanWebsite(baseUrl, scanId) {
   try {
     addLog(`🚀 Starting scan for ${baseUrl}`, 'info');
     
-    // FIXED: Better Vercel chromium setup
-    const executablePath = await chromium.executablePath();
+    let executablePath;
+    let args;
+    let headless;
     
-    browser = await puppeteer.launch({
-      args: [
+    // Detect environment - Vercel vs Local
+    if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+      // Production Vercel environment
+      addLog(`📦 Using Vercel/Lambda Chromium`, 'info');
+      executablePath = await chromium.executablePath();
+      args = [
         ...chromium.args,
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -110,23 +147,42 @@ async function scanWebsite(baseUrl, scanId) {
         '--no-zygote',
         '--disable-gpu',
         '--disable-web-security',
-        '--disable-features=VizDisplayCompositor',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding',
-        '--disable-features=TranslateUI',
-        '--disable-ipc-flooding-protection',
-        '--disable-hang-monitor',
-        '--disable-client-side-phishing-detection',
-        '--disable-component-update',
-        '--disable-default-apps'
-      ],
-      defaultViewport: chromium.defaultViewport,
-      executablePath,
-      headless: chromium.headless,
-      ignoreHTTPSErrors: true,
-      timeout: 60000 // 60 second timeout
-    });
+        '--disable-features=VizDisplayCompositor'
+      ];
+      headless = chromium.headless;
+    } else {
+      // Local development environment
+      addLog(`💻 Using local Chromium (dev mode)`, 'info');
+      
+      // Try to find local Chrome installation
+      const { default: puppeteerFull } = await import('puppeteer');
+      browser = await puppeteerFull.launch({
+        headless: "new",
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-web-security'
+        ],
+        timeout: 60000
+      });
+      
+      // Skip the rest of the browser launch since we already launched
+      addLog(`✅ Local browser launched successfully`, 'success');
+    }
+    
+    // Only launch if we haven't already (for local dev)
+    if (!browser) {
+      browser = await puppeteer.launch({
+        args,
+        defaultViewport: chromium.defaultViewport,
+        executablePath,
+        headless,
+        ignoreHTTPSErrors: true,
+        timeout: 60000
+      });
+      addLog(`✅ Browser launched successfully`, 'success');
+    }
 
     const visitedPages = new Set();
     const allIssues = {
