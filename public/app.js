@@ -132,8 +132,8 @@ class WebsiteTester {
     async pollForResults() {
         this.pollInterval = setInterval(async () => {
             try {
-                // FIXED: This was the bug - should be `/api/scan/${this.currentScanId}` not query param
-                const response = await fetch(`/api/scan/${this.currentScanId}`);
+                // FIXED: Use query parameter instead of path parameter for Vercel
+                const response = await fetch(`/api/scan?scanId=${this.currentScanId}`);
                 const scan = await response.json();
                 
                 // Update progress with smooth animation

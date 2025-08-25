@@ -3,10 +3,6 @@
   "version": "1.0.0",
   "description": "Advanced website testing tool",
   "type": "module",
-  "scripts": {
-    "build": "echo 'No build step needed for Vercel'",
-    "start": "echo 'Use vercel dev for local development'"
-  },
   "dependencies": {
     "@sparticuz/chromium": "^126.0.0",
     "cors": "^2.8.5",
@@ -23,7 +19,5 @@
     "scanner",
     "links",
     "buttons"
-  ],
-  "author": "Your Name",
-  "license": "MIT"
+  ]
 }
