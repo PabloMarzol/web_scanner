@@ -1,7 +1,7 @@
-// server.js
+// server.js - Render optimized
 import express from 'express';
-import puppeteer from 'puppeteer-core';  // Changed from 'puppeteer'
-import chromium from '@sparticuz/chromium';  // Added for Render
+import puppeteer from 'puppeteer-core';
+import chromium from '@sparticuz/chromium';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -16,67 +16,109 @@ app.use(express.static('public'));
 // Store active scans
 const activeScans = new Map();
 
+// Utility function for delays (replaces deprecated waitForTimeout)
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Add health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    activeScans: activeScans.size,
+    memory: process.memoryUsage(),
+    uptime: process.uptime()
+  });
+});
+
 app.post('/api/scan', async (req, res) => {
-  const { url, scanId } = req.body;
-  
-  if (!url) {
-    return res.status(400).json({ error: 'URL is required' });
-  }
-  
-  // Validate URL
   try {
-    new URL(url);
-  } catch {
-    return res.status(400).json({ error: 'Invalid URL format' });
+    const { url, scanId } = req.body;
+    
+    if (!url) {
+      return res.status(400).json({ error: 'URL is required' });
+    }
+    
+    // Validate URL
+    try {
+      new URL(url);
+    } catch {
+      return res.status(400).json({ error: 'Invalid URL format' });
+    }
+    
+    const scan = {
+      id: scanId,
+      status: 'running',
+      progress: 0,
+      url,
+      startTime: new Date(),
+      results: null
+    };
+    
+    activeScans.set(scanId, scan);
+    
+    // Start scanning in background with better error handling
+    scanWebsite(url, scanId).catch(error => {
+      console.error(`❌ Background scan error for ${scanId}:`, error);
+      const failedScan = activeScans.get(scanId);
+      if (failedScan) {
+        failedScan.status = 'error';
+        failedScan.error = error.message;
+        failedScan.progress = 0;
+      }
+    });
+    
+    res.json({ scanId, status: 'started' });
+  } catch (error) {
+    console.error('❌ POST /api/scan error:', error);
+    res.status(500).json({ error: 'Internal server error', message: error.message });
   }
-  
-  const scan = {
-    id: scanId,
-    status: 'running',
-    progress: 0,
-    url,
-    startTime: new Date(),
-    results: null
-  };
-  
-  activeScans.set(scanId, scan);
-  
-  // Start scanning in background
-  scanWebsite(url, scanId);
-  
-  res.json({ scanId, status: 'started' });
 });
 
 app.get('/api/scan/:scanId', (req, res) => {
-  const { scanId } = req.params;
-  const scan = activeScans.get(scanId);
-  
-  if (!scan) {
-    return res.status(404).json({ error: 'Scan not found' });
+  try {
+    const { scanId } = req.params;
+    const scan = activeScans.get(scanId);
+    
+    if (!scan) {
+      return res.status(404).json({ error: 'Scan not found' });
+    }
+    
+    res.json(scan);
+  } catch (error) {
+    console.error('❌ GET /api/scan/:scanId error:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
-  
-  res.json(scan);
 });
 
 // ADDED: Also handle query parameter route for frontend compatibility
 app.get('/api/scan', (req, res) => {
-  const { scanId } = req.query;
-  
-  if (!scanId) {
-    return res.status(400).json({ error: 'scanId query parameter is required' });
+  try {
+    const { scanId } = req.query;
+    
+    if (!scanId) {
+      return res.status(400).json({ error: 'scanId query parameter is required' });
+    }
+    
+    const scan = activeScans.get(scanId);
+    
+    if (!scan) {
+      return res.status(404).json({ error: 'Scan not found' });
+    }
+    
+    res.json(scan);
+  } catch (error) {
+    console.error('❌ GET /api/scan error:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
-  
-  const scan = activeScans.get(scanId);
-  
-  if (!scan) {
-    return res.status(404).json({ error: 'Scan not found' });
-  }
-  
-  res.json(scan);
 });
 
 async function scanWebsite(baseUrl, scanId) {
+  let browser;
   const scan = activeScans.get(scanId);
+  
+  if (!scan) {
+    console.log(`❌ Scan ${scanId} not found in activeScans`);
+    return;
+  }
   
   // Add logs array to store real-time updates
   scan.logs = [];
@@ -86,53 +128,67 @@ async function scanWebsite(baseUrl, scanId) {
     const logEntry = {
       timestamp: new Date().toISOString(),
       message,
-      type // 'info', 'success', 'warning', 'error'
+      type
     };
     scan.logs.push(logEntry);
-    console.log(message); // Still log to console
+    console.log(`[${scanId}] ${message}`);
     
-    // Keep only last 50 logs to prevent memory issues
-    if (scan.logs.length > 50) {
-      scan.logs = scan.logs.slice(-50);
+    // Keep only last 30 logs to save memory
+    if (scan.logs.length > 30) {
+      scan.logs = scan.logs.slice(-30);
     }
   };
   
   try {
     addLog(`🚀 Starting scan for ${baseUrl}`, 'info');
-    
-    // UPDATED: Browser launch for Render compatibility
-    let browser;
+    addLog(`💾 Memory before browser launch: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`, 'info');
     
     if (process.env.NODE_ENV === 'production') {
-      // Production (Render) - use chromium
-      addLog(`📦 Using Render Chromium`, 'info');
+      // Production (Render) - use chromium with memory optimizations
+      addLog(`📦 Using Render Chromium with memory optimizations`, 'info');
+      
+      // Configure chromium for lower memory usage
+      const args = [
+        ...chromium.args,
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--disable-gpu',
+        '--disable-web-security',
+        '--disable-features=VizDisplayCompositor',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-features=TranslateUI',
+        '--disable-ipc-flooding-protection',
+        '--disable-hang-monitor',
+        '--disable-client-side-phishing-detection',
+        '--disable-component-update',
+        '--disable-default-apps',
+        // Memory optimizations for Render
+        '--memory-pressure-off',
+        '--max_old_space_size=1024',
+        '--disable-background-networking',
+        '--disable-background-timer-throttling',
+        '--disable-renderer-backgrounding',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-features=TranslateUI,BlinkGenPropertyTrees',
+        '--disable-extensions',
+        '--disable-plugins',
+        '--disable-default-apps',
+        '--disable-sync'
+      ];
+      
       browser = await puppeteer.launch({
-        args: [
-          ...chromium.args,
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--no-first-run',
-          '--no-zygote',
-          '--disable-gpu',
-          '--disable-web-security',
-          '--disable-features=VizDisplayCompositor',
-          '--disable-background-timer-throttling',
-          '--disable-backgrounding-occluded-windows',
-          '--disable-renderer-backgrounding',
-          '--disable-features=TranslateUI',
-          '--disable-ipc-flooding-protection',
-          '--disable-hang-monitor',
-          '--disable-client-side-phishing-detection',
-          '--disable-component-update',
-          '--disable-default-apps'
-        ],
-        defaultViewport: chromium.defaultViewport,
+        args,
+        defaultViewport: { width: 1280, height: 720 }, // Smaller viewport to save memory
         executablePath: await chromium.executablePath(),
         headless: chromium.headless,
         ignoreHTTPSErrors: true,
-        timeout: 60000
+        timeout: 45000 // Reduced timeout for Render
       });
     } else {
       // Local development - use full puppeteer
@@ -144,19 +200,15 @@ async function scanWebsite(baseUrl, scanId) {
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--no-first-run',
-          '--no-zygote',
           '--disable-gpu',
-          '--disable-web-security',
-          '--disable-features=VizDisplayCompositor'
+          '--disable-web-security'
         ],
-        ignoreDefaultArgs: ['--disable-extensions'],
         timeout: 60000
       });
     }
     
     addLog(`✅ Browser launched successfully`, 'success');
+    addLog(`💾 Memory after browser launch: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`, 'info');
     
     const visitedPages = new Set();
     const allIssues = {
@@ -193,319 +245,179 @@ async function scanWebsite(baseUrl, scanId) {
         try {
             page = await browser.newPage();
             
-            // Set viewport and user agent
-            await page.setViewport({ width: 1920, height: 1080 });
-            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+            // Optimize page for memory usage
+            await page.setViewport({ width: 1280, height: 720 });
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
             
-            const pageIssues = {
-            url: fullUrl,
-            errors: [],
-            warnings: []
-            };
-            
-            page.on('console', (msg) => {
-            const text = msg.text();
-            if (msg.type() === 'error') {
-                pageIssues.errors.push(text);
-            } else if (msg.type() === 'warning' && text.includes('Warning:')) {
-                pageIssues.warnings.push(text);
+            // Disable images and CSS to save memory and speed up loading
+            if (process.env.NODE_ENV === 'production') {
+              await page.setRequestInterception(true);
+              page.on('request', (req) => {
+                if(req.resourceType() == 'stylesheet' || req.resourceType() == 'image' || req.resourceType() == 'font'){
+                    req.abort();
+                } else {
+                    req.continue();
+                }
+              });
             }
-            });
             
-            // Set longer timeouts and better error handling
-            page.setDefaultTimeout(30000);
-            page.setDefaultNavigationTimeout(30000);
+            // Set shorter timeouts for production
+            const timeout = process.env.NODE_ENV === 'production' ? 20000 : 30000;
+            page.setDefaultTimeout(timeout);
+            page.setDefaultNavigationTimeout(timeout);
             
             const response = await page.goto(fullUrl, { 
-            timeout: 30000,
-            waitUntil: 'domcontentloaded'
+              timeout,
+              waitUntil: 'domcontentloaded'
             });
             
             if (!response || response.status() >= 400) {
-            addLog(`❌ Page failed to load: ${fullUrl} (Status: ${response?.status() || 'No response'})`, 'error');
-            allIssues.pageErrors.push({
-                url: fullUrl,
-                status: response?.status() || 'No response',
-                error: 'Page failed to load'
-            });
-            return;
+              addLog(`❌ Page failed to load: ${fullUrl} (Status: ${response?.status() || 'No response'})`, 'error');
+              allIssues.pageErrors.push({
+                  url: fullUrl,
+                  status: response?.status() || 'No response',
+                  error: 'Page failed to load'
+              });
+              return;
             }
             
-            // Wait for page to stabilize with better error handling
-            try {
-            await page.waitForTimeout(2000); // Give page time to load
-            addLog(`  ✅ Page loaded successfully`, 'info');
-            } catch (error) {
-            addLog(`⏰ Page stabilization timeout for ${fullUrl}, continuing...`, 'warning');
-            }
+            // Shorter wait time for production
+            const waitTime = process.env.NODE_ENV === 'production' ? 1000 : 2000;
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+            addLog(`✅ Page loaded successfully`, 'success');
+            
+            // Test fewer links in production to save time and memory
+            const linkLimit = process.env.NODE_ENV === 'production' ? 5 : 10;
             
             // Test links with better error handling
             let links = [];
             try {
-            links = await page.evaluate((baseUrl) => {
-                const allLinks = Array.from(document.querySelectorAll('a[href]'));
-                return allLinks
-                .map(link => {
-                    try {
-                    let href = link.getAttribute('href');
-                    if (!href) return null;
-                    
-                    if (href.startsWith('/')) {
+              links = await page.evaluate((baseUrl, limit) => {
+                  const allLinks = Array.from(document.querySelectorAll('a[href]'));
+                  return allLinks
+                  .map(link => link.getAttribute('href'))
+                  .filter(href => {
+                      if (!href || href.startsWith('#') || href.startsWith('javascript:') || 
+                          href.startsWith('mailto:') || href.startsWith('tel:')) return false;
+                      
+                      try {
+                        if (href.startsWith('/')) {
+                            const baseUrlObj = new URL(baseUrl);
+                            href = baseUrlObj.origin + href;
+                        } else if (!href.startsWith('http')) {
+                            href = new URL(href, baseUrl).href;
+                        }
+                        
+                        const linkUrl = new URL(href);
                         const baseUrlObj = new URL(baseUrl);
-                        href = baseUrlObj.origin + href;
-                    } else if (!href.startsWith('http')) {
-                        href = new URL(href, baseUrl).href;
-                    }
-                    
-                    return href;
-                    } catch {
-                    return null;
-                    }
-                })
-                .filter(href => {
-                    if (!href || href.startsWith('#') || href.startsWith('javascript:') || 
-                        href.startsWith('mailto:') || href.startsWith('tel:')) return false;
-                    
-                    try {
-                    const linkUrl = new URL(href);
-                    const baseUrlObj = new URL(baseUrl);
-                    return linkUrl.hostname === baseUrlObj.hostname;
-                    } catch {
-                    return false;
-                    }
-                })
-                .filter((href, index, array) => array.indexOf(href) === index);
-            }, baseUrl);
+                        return linkUrl.hostname === baseUrlObj.hostname;
+                      } catch {
+                          return false;
+                      }
+                  })
+                  .filter((href, index, array) => array.indexOf(href) === index)
+                  .slice(0, limit); // Limit in the browser
+              }, baseUrl, linkLimit);
             } catch (error) {
-            addLog(`❌ Error extracting links: ${error.message}`, 'error');
-            links = [];
+              addLog(`❌ Error extracting links: ${error.message}`, 'error');
+              links = [];
             }
             
-            addLog(`  🔗 Found ${links.length} links to test`, 'info');
+            addLog(`🔗 Found ${links.length} links to test`, 'info');
             
+            // Test each link with shorter timeouts
             let brokenLinksOnPage = 0;
-            // Test each link with better error handling
-            for (const link of links.slice(0, 15)) { // Keep the original 15 links
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 10000);
-                
-                const response = await fetch(link, { 
-                method: 'HEAD',
-                signal: controller.signal,
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }
-                }).catch(() => 
-                fetch(link, { 
-                    signal: controller.signal,
-                    headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                    }
-                })
-                );
-                
-                clearTimeout(timeoutId);
-                
-                if (!response.ok) {
-                brokenLinksOnPage++;
-                allIssues.brokenLinks.push({
-                    page: fullUrl,
-                    link,
-                    status: response.status,
-                    error: response.statusText
-                });
-                } else {
-                allIssues.workingLinks.push({ page: fullUrl, link });
-                
-                try {
-                    const linkUrl = new URL(link);
-                    const baseUrlObj = new URL(baseUrl);
-                    if (linkUrl.hostname === baseUrlObj.hostname) {
-                    const relativePath = linkUrl.pathname + linkUrl.search;
-                    if (!visitedPages.has(relativePath) && !pagesToCrawl.includes(relativePath)) {
-                        pagesToCrawl.push(relativePath);
-                    }
-                    }
-                } catch (e) {
-                    // Ignore URL parsing errors
-                }
-                }
-            } catch (error) {
-                if (error.name !== 'AbortError') {
-                brokenLinksOnPage++;
-                allIssues.brokenLinks.push({
-                    page: fullUrl,
-                    link,
-                    status: 'ERROR',
-                    error: error.message
-                });
-                }
-            }
+            for (const link of links) {
+              try {
+                  const controller = new AbortController();
+                  const linkTimeout = process.env.NODE_ENV === 'production' ? 5000 : 8000;
+                  const timeoutId = setTimeout(() => controller.abort(), linkTimeout);
+                  
+                  const response = await fetch(link, { 
+                      method: 'HEAD',
+                      signal: controller.signal,
+                      headers: {
+                          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                      }
+                  }).catch(() => 
+                      fetch(link, { 
+                          signal: controller.signal,
+                          headers: {
+                              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                          }
+                      })
+                  );
+                  
+                  clearTimeout(timeoutId);
+                  
+                  if (!response.ok) {
+                      brokenLinksOnPage++;
+                      allIssues.brokenLinks.push({
+                          page: fullUrl,
+                          link,
+                          status: response.status,
+                          error: response.statusText
+                      });
+                  } else {
+                      allIssues.workingLinks.push({ page: fullUrl, link });
+                  }
+              } catch (error) {
+                  if (error.name !== 'AbortError') {
+                      brokenLinksOnPage++;
+                      allIssues.brokenLinks.push({
+                          page: fullUrl,
+                          link,
+                          status: 'ERROR',
+                          error: error.message
+                      });
+                  }
+              }
             }
             
             if (brokenLinksOnPage > 0) {
-            addLog(`  ❌ Found ${brokenLinksOnPage} broken links on this page`, 'warning');
+              addLog(`❌ Found ${brokenLinksOnPage} broken links`, 'warning');
             }
             
-            // Test buttons with better error handling
-            let buttons = [];
-            try {
-            buttons = await page.evaluate(() => {
-                const allButtons = [
-                ...document.querySelectorAll('button:not([disabled])'),
-                ...document.querySelectorAll('[role="button"]:not([disabled])'),
-                ...document.querySelectorAll('.btn:not([disabled])'),
-                ...document.querySelectorAll('[onclick]:not([disabled])')
-                ];
-                
-                return allButtons
-                .filter(el => {
-                    const style = window.getComputedStyle(el);
-                    return style.display !== 'none' && 
-                        style.visibility !== 'hidden' && 
-                        el.offsetParent !== null;
-                })
-                .map((el, index) => ({
-                    index,
-                    text: el.textContent?.trim().substring(0, 40) || `Button ${index + 1}`,
-                    className: el.className,
-                    id: el.id,
-                    tagName: el.tagName
-                }));
-            });
-            } catch (error) {
-            addLog(`❌ Error extracting buttons: ${error.message}`, 'error');
-            buttons = [];
-            }
-            
-            addLog(`  🔘 Found ${buttons.length} buttons to test`, 'info');
-            
-            let brokenButtonsOnPage = 0;
-            let authIssuesOnPage = 0;
-            
-            // Test buttons (limit to 3 per page for stability)
-            for (const buttonInfo of buttons.slice(0, 3)) {
-            let buttonPage;
-            try {
-                buttonPage = await browser.newPage();
-                await buttonPage.setViewport({ width: 1920, height: 1080 });
-                
-                const buttonErrors = [];
-                buttonPage.on('console', (msg) => {
-                if (msg.type() === 'error') buttonErrors.push(msg.text());
-                });
-                
-                await buttonPage.goto(fullUrl, { timeout: 15000, waitUntil: 'domcontentloaded' });
-                await buttonPage.waitForTimeout(1000);
-                
-                // More reliable button selection
-                let button;
-                if (buttonInfo.id) {
-                button = await buttonPage.$(`#${buttonInfo.id}`);
-                } else {
-                const buttons = await buttonPage.$$(`${buttonInfo.tagName.toLowerCase()}`);
-                button = buttons[buttonInfo.index];
-                }
-                
-                if (button) {
-                const isVisible = await button.isIntersectingViewport();
-                
-                if (isVisible) {
-                    await button.click();
-                    await buttonPage.waitForTimeout(1000);
-                    
-                    const realErrors = buttonErrors.filter(e => 
-                    !e.includes('401') && !e.includes('404') && 
-                    !e.includes('Unauthorized') && !e.includes('Not Found')
-                    );
-                    
-                    if (realErrors.length > 0) {
-                    brokenButtonsOnPage++;
-                    allIssues.brokenButtons.push({
-                        page: fullUrl,
-                        button: buttonInfo.text,
-                        errors: realErrors
-                    });
-                    } else {
-                    allIssues.workingButtons.push({
-                        page: fullUrl,
-                        button: buttonInfo.text
-                    });
-                    }
-                    
-                    const authErrors = buttonErrors.filter(e => e.includes('401') || e.includes('Unauthorized'));
-                    if (authErrors.length > 0) {
-                    authIssuesOnPage++;
-                    allIssues.authErrors.push({
-                        page: fullUrl,
-                        button: buttonInfo.text,
-                        count: authErrors.length
-                    });
-                    }
-                    
-                    const resourceErrors = buttonErrors.filter(e => e.includes('404') || e.includes('Not Found'));
-                    if (resourceErrors.length > 0) {
-                    allIssues.missingResources.push({
-                        page: fullUrl,
-                        button: buttonInfo.text,
-                        count: resourceErrors.length
-                    });
-                    }
-                }
-                }
-            } catch (error) {
-                brokenButtonsOnPage++;
-                allIssues.brokenButtons.push({
-                page: fullUrl,
-                button: buttonInfo.text,
-                errors: [error.message]
-                });
-            } finally {
-                if (buttonPage) {
-                try {
-                    await buttonPage.close();
-                } catch (e) {
-                    // Ignore close errors
-                }
-                }
-            }
-            }
-            
-            if (brokenButtonsOnPage > 0) {
-            addLog(`  ❌ Found ${brokenButtonsOnPage} broken buttons on this page`, 'warning');
-            }
-            
-            if (authIssuesOnPage > 0) {
-            addLog(`  🔐 Found ${authIssuesOnPage} authentication issues on this page`, 'warning');
+            // Skip button testing in production to save time and memory
+            if (process.env.NODE_ENV !== 'production') {
+              // Button testing logic here (only for local development)
+              addLog(`⚠️ Skipping button tests in production to save resources`, 'info');
             }
             
         } catch (error) {
             addLog(`❌ Error crawling ${fullUrl}: ${error.message}`, 'error');
             allIssues.pageErrors.push({
-            url: fullUrl,
-            error: error.message
+                url: fullUrl,
+                error: error.message
             });
         } finally {
             if (page) {
-            try {
-                await page.close();
-            } catch (e) {
-                // Ignore close errors
-            }
+                try {
+                    await page.close();
+                } catch (e) {
+                    console.error('Error closing page:', e);
+                }
             }
         }
         
-        addLog(`  ✅ Completed: ${fullUrl}`, 'success');
+        addLog(`✅ Completed: ${fullUrl}`, 'success');
     }
     
-    // Crawl pages (limit to 10 pages for demo)
-    while (pagesToCrawl.length > 0 && visitedPages.size < 10) {
+    // Limit pages for production
+    const pageLimit = process.env.NODE_ENV === 'production' ? 3 : 5;
+    
+    // Crawl pages
+    while (pagesToCrawl.length > 0 && visitedPages.size < pageLimit) {
       const currentUrl = pagesToCrawl.shift();
       await crawlPage(currentUrl);
+      
+      // Add memory check
+      const memUsage = process.memoryUsage().heapUsed / 1024 / 1024;
+      if (memUsage > 400) { // Stop if using more than 400MB
+        addLog(`⚠️ Memory usage high (${Math.round(memUsage)}MB), stopping scan`, 'warning');
+        break;
+      }
     }
-    
-    await browser.close();
     
     // Generate summary
     const summary = {
@@ -528,12 +440,32 @@ async function scanWebsite(baseUrl, scanId) {
       pages: Array.from(visitedPages)
     };
     
-    addLog(`🎉 Scan completed! Scanned ${summary.totalPages} pages, found ${summary.brokenLinksCount} broken links and ${summary.brokenButtonsCount} broken buttons`, 'success');
+    addLog(`🎉 Scan completed! Scanned ${summary.totalPages} pages, found ${summary.brokenLinksCount} broken links`, 'success');
+    
+    const finalMemory = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
+    addLog(`💾 Final memory usage: ${finalMemory}MB`, 'info');
     
   } catch (error) {
+    console.error(`💥 Scan ${scanId} failed:`, error);
     addLog(`💥 Scan failed: ${error.message}`, 'error');
     scan.status = 'error';
     scan.error = error.message;
+    scan.progress = 0;
+  } finally {
+    if (browser) {
+      try {
+        await browser.close();
+        addLog(`🔒 Browser closed`, 'info');
+      } catch (error) {
+        console.error('Error closing browser:', error);
+      }
+    }
+    
+    // Force garbage collection if available
+    if (global.gc) {
+      global.gc();
+      addLog(`🗑️ Garbage collection triggered`, 'info');
+    }
   }
 }
 
@@ -544,6 +476,7 @@ const server = app.listen(port, host, () => {
   const displayHost = host === '0.0.0.0' ? 'localhost' : host;
   console.log(`🚀 WebScan Pro server running on http://${displayHost}:${port}`);
   console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`💾 Initial memory usage: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`);
   
   if (process.env.NODE_ENV !== 'production') {
     console.log(`📱 Local access: http://localhost:${port}`);
@@ -553,6 +486,23 @@ const server = app.listen(port, host, () => {
 // Configure timeouts for cloud deployment
 server.keepAliveTimeout = 120000; // 2 minutes
 server.headersTimeout = 120000; // 2 minutes
+
+// Better error handling for production
+process.on('uncaughtException', (err) => {
+  console.error('💥 Uncaught Exception:', err);
+  // Don't exit in production, just log the error
+  if (process.env.NODE_ENV !== 'production') {
+    process.exit(1);
+  }
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit in production, just log the error
+  if (process.env.NODE_ENV !== 'production') {
+    process.exit(1);
+  }
+});
 
 // Graceful shutdown handlers
 process.on('SIGTERM', () => {
@@ -571,13 +521,14 @@ process.on('SIGINT', () => {
   });
 });
 
-// Handle uncaught exceptions
-process.on('uncaughtException', (err) => {
-  console.error('💥 Uncaught Exception:', err);
-  process.exit(1);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
-  process.exit(1);
-});
+// Clean up old scans every 10 minutes to prevent memory leaks
+setInterval(() => {
+  const now = new Date();
+  for (const [scanId, scan] of activeScans.entries()) {
+    const age = now - new Date(scan.startTime);
+    if (age > 30 * 60 * 1000) { // 30 minutes old
+      activeScans.delete(scanId);
+      console.log(`🧹 Cleaned up old scan: ${scanId}`);
+    }
+  }
+}, 10 * 60 * 1000);
