@@ -84,29 +84,18 @@ async function scanWebsite(baseUrl, scanId) {
     addLog(`🚀 Starting scan for ${baseUrl}`, 'info');
     
     const browser = await puppeteer.launch({
-        headless: "new", // Use new headless mode to fix the warning
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
             '--disable-gpu',
-            '--disable-web-security',
-            '--disable-features=VizDisplayCompositor',
-            '--disable-background-timer-throttling',
-            '--disable-backgrounding-occluded-windows',
-            '--disable-renderer-backgrounding',
-            '--disable-features=TranslateUI',
-            '--disable-ipc-flooding-protection',
-            '--disable-hang-monitor',
-            '--disable-client-side-phishing-detection',
-            '--disable-component-update',
-            '--disable-default-apps'
+            '--disable-web-security'
         ],
-        ignoreDefaultArgs: ['--disable-extensions'],
-        timeout: 60000 // 60 second timeout
+        executablePath: process.env.NODE_ENV === 'production' 
+            ? await chromium.executablePath()
+            : undefined,
+        headless: "new",
+        timeout: 60000
     });
     const visitedPages = new Set();
     const allIssues = {

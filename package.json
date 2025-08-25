@@ -1,23 +1,17 @@
 {
   "name": "webscan-pro",
   "version": "1.0.0",
-  "description": "Advanced website testing tool",
-  "type": "module",
+  "scripts": {
+    "start": "node serv.js",
+    "build": "echo 'No build needed'"
+  },
   "dependencies": {
     "@sparticuz/chromium": "^126.0.0",
     "cors": "^2.8.5",
     "express": "^5.1.0",
-    "puppeteer": "^24.17.0",
     "puppeteer-core": "^22.15.0"
   },
   "engines": {
-    "node": "22.x"
-  },
-  "keywords": [
-    "website",
-    "testing",
-    "scanner",
-    "links",
-    "buttons"
-  ]
+    "node": "20.x"
+  }
 }
