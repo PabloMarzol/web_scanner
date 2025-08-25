@@ -154,7 +154,11 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
     addLog(`🚀 Starting scan for ${baseUrl}`, 'info');
     addLog(`💾 Memory before browser launch: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`, 'info');
     
-    if (process.env.NODE_ENV === 'production') {
+    // Better environment detection - check for Render-specific environment variables
+    const isRenderProduction = process.env.RENDER || process.env.RENDER_SERVICE_ID;
+    const isLocalProduction = process.env.NODE_ENV === 'production' && !isRenderProduction;
+    
+    if (isRenderProduction) {
       // Production (Render) - use chromium with memory optimizations
       addLog(`📦 Using Render Chromium with memory optimizations`, 'info');
       
@@ -202,8 +206,8 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
         timeout: 45000 // Reduced timeout for Render
       });
     } else {
-      // Local development - use full puppeteer
-      addLog(`💻 Using local Puppeteer (dev mode)`, 'info');
+      // Local development (including local production mode) - use full puppeteer
+      addLog(`💻 Using local Puppeteer (${process.env.NODE_ENV} mode)`, 'info');
       const { default: puppeteerFull } = await import('puppeteer');
       browser = await puppeteerFull.launch({
         headless: "new",
@@ -267,8 +271,8 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
             await page.setViewport({ width: 1280, height: 720 });
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
             
-            // Disable images and CSS to save memory and speed up loading
-            if (process.env.NODE_ENV === 'production') {
+            // Disable images and CSS to save memory and speed up loading (only on Render)
+            if (isRenderProduction) {
               await page.setRequestInterception(true);
               page.on('request', (req) => {
                 if(req.resourceType() == 'stylesheet' || req.resourceType() == 'image' || req.resourceType() == 'font'){
@@ -279,8 +283,8 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
               });
             }
             
-            // Set shorter timeouts for production
-            const timeout = process.env.NODE_ENV === 'production' ? 20000 : 30000;
+            // Set timeouts based on environment
+            const timeout = isRenderProduction ? 20000 : 30000;
             page.setDefaultTimeout(timeout);
             page.setDefaultNavigationTimeout(timeout);
             
@@ -299,8 +303,8 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
               return;
             }
             
-            // Shorter wait time for production
-            const waitTime = process.env.NODE_ENV === 'production' ? 1000 : 2000;
+            // Wait time based on environment
+            const waitTime = isRenderProduction ? 1000 : 2000;
             await new Promise(resolve => setTimeout(resolve, waitTime));
             addLog(`✅ Page loaded successfully`, 'success');
             
@@ -400,12 +404,12 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
             
             addLog(`🔗 Found ${links.length} links to test`, 'info');
             
-            // Test each link with shorter timeouts
+            // Test each link with environment-specific timeouts
             let brokenLinksOnPage = 0;
             for (const link of links) {
               try {
                   const controller = new AbortController();
-                  const linkTimeout = process.env.NODE_ENV === 'production' ? 5000 : 8000;
+                  const linkTimeout = isRenderProduction ? 5000 : 8000;
                   const timeoutId = setTimeout(() => controller.abort(), linkTimeout);
                   
                   const response = await fetch(link, { 
@@ -476,10 +480,141 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
               addLog(`❌ Found ${brokenLinksOnPage} broken links`, 'warning');
             }
             
-            // Skip button testing in production to save time and memory
-            if (process.env.NODE_ENV !== 'production') {
-              // Button testing logic here (only for local development)
-              addLog(`⚠️ Skipping button tests in production to save resources`, 'info');
+            // Button testing - enabled for comprehensive scans
+            if (options.includeButtons !== false) {
+              let buttons = [];
+              try {
+                buttons = await page.evaluate(() => {
+                  const allButtons = [
+                    ...document.querySelectorAll('button:not([disabled])'),
+                    ...document.querySelectorAll('[role="button"]:not([disabled])'),
+                    ...document.querySelectorAll('.btn:not([disabled])'),
+                    ...document.querySelectorAll('[onclick]:not([disabled])')
+                  ];
+                  
+                  return allButtons
+                    .filter(el => {
+                      const style = window.getComputedStyle(el);
+                      return style.display !== 'none' && 
+                             style.visibility !== 'hidden' && 
+                             el.offsetParent !== null;
+                    })
+                    .map((el, index) => ({
+                      index,
+                      text: el.textContent?.trim().substring(0, 40) || `Button ${index + 1}`,
+                      className: el.className,
+                      id: el.id,
+                      tagName: el.tagName
+                    }));
+                });
+              } catch (error) {
+                addLog(`❌ Error extracting buttons: ${error.message}`, 'error');
+                buttons = [];
+              }
+              
+              addLog(`🔘 Found ${buttons.length} buttons to test`, 'info');
+              
+              let brokenButtonsOnPage = 0;
+              let authIssuesOnPage = 0;
+              
+              // Test buttons (limit based on environment)
+              const buttonLimit = isRenderProduction ? 2 : 5;
+              for (const buttonInfo of buttons.slice(0, buttonLimit)) {
+                let buttonPage;
+                try {
+                  buttonPage = await browser.newPage();
+                  await buttonPage.setViewport({ width: 1280, height: 720 });
+                  
+                  const buttonErrors = [];
+                  buttonPage.on('console', (msg) => {
+                    if (msg.type() === 'error') buttonErrors.push(msg.text());
+                  });
+                  
+                  await buttonPage.goto(fullUrl, { timeout: 15000, waitUntil: 'domcontentloaded' });
+                  await new Promise(resolve => setTimeout(resolve, 1000));
+                  
+                  // More reliable button selection
+                  let button;
+                  if (buttonInfo.id) {
+                    button = await buttonPage.$(`#${buttonInfo.id}`);
+                  } else {
+                    const buttons = await buttonPage.$(`${buttonInfo.tagName.toLowerCase()}`);
+                    button = buttons[buttonInfo.index];
+                  }
+                  
+                  if (button) {
+                    const isVisible = await button.isIntersectingViewport();
+                    
+                    if (isVisible) {
+                      await button.click();
+                      await new Promise(resolve => setTimeout(resolve, 1000));
+                      
+                      const realErrors = buttonErrors.filter(e => 
+                        !e.includes('401') && !e.includes('404') && 
+                        !e.includes('Unauthorized') && !e.includes('Not Found')
+                      );
+                      
+                      if (realErrors.length > 0) {
+                        brokenButtonsOnPage++;
+                        allIssues.brokenButtons.push({
+                          page: fullUrl,
+                          button: buttonInfo.text,
+                          errors: realErrors
+                        });
+                      } else {
+                        allIssues.workingButtons.push({
+                          page: fullUrl,
+                          button: buttonInfo.text
+                        });
+                      }
+                      
+                      const authErrors = buttonErrors.filter(e => e.includes('401') || e.includes('Unauthorized'));
+                      if (authErrors.length > 0) {
+                        authIssuesOnPage++;
+                        allIssues.authErrors.push({
+                          page: fullUrl,
+                          button: buttonInfo.text,
+                          count: authErrors.length
+                        });
+                      }
+                      
+                      const resourceErrors = buttonErrors.filter(e => e.includes('404') || e.includes('Not Found'));
+                      if (resourceErrors.length > 0) {
+                        allIssues.missingResources.push({
+                          page: fullUrl,
+                          button: buttonInfo.text,
+                          count: resourceErrors.length
+                        });
+                      }
+                    }
+                  }
+                } catch (error) {
+                  brokenButtonsOnPage++;
+                  allIssues.brokenButtons.push({
+                    page: fullUrl,
+                    button: buttonInfo.text,
+                    errors: [error.message]
+                  });
+                } finally {
+                  if (buttonPage) {
+                    try {
+                      await buttonPage.close();
+                    } catch (e) {
+                      // Ignore close errors
+                    }
+                  }
+                }
+              }
+              
+              if (brokenButtonsOnPage > 0) {
+                addLog(`❌ Found ${brokenButtonsOnPage} broken buttons`, 'warning');
+              }
+              
+              if (authIssuesOnPage > 0) {
+                addLog(`🔐 Found ${authIssuesOnPage} authentication issues`, 'warning');
+              }
+            } else {
+              addLog(`⚠️ Button testing disabled`, 'info');
             }
             
         } catch (error) {

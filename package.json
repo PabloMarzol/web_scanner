@@ -5,15 +5,16 @@
   "type": "module",
   "scripts": {
     "build": "echo 'No build step needed for Vercel'",
-    "start": "node serv.js",
-    "dev": "node serv.js"
+    "start": "cross-env NODE_ENV=production node serv.js",
+    "dev": "cross-env NODE_ENV=development node serv.js"
   },
   "dependencies": {
     "@sparticuz/chromium": "^126.0.0",
-    "puppeteer-core": "^22.15.0",
-    "puppeteer": "^22.15.0",
     "cors": "^2.8.5",
-    "express": "^5.1.0"
+    "cross-env": "^10.0.0",
+    "express": "^5.1.0",
+    "puppeteer": "^22.15.0",
+    "puppeteer-core": "^22.15.0"
   },
   "engines": {
     "node": "20.x"
