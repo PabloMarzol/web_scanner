@@ -31,7 +31,7 @@ app.get('/health', (req, res) => {
 
 app.post('/api/scan', async (req, res) => {
   try {
-    const { url, scanId } = req.body;
+    const { url, scanId, options = {} } = req.body;
     
     if (!url) {
       return res.status(400).json({ error: 'URL is required' });
@@ -44,11 +44,22 @@ app.post('/api/scan', async (req, res) => {
       return res.status(400).json({ error: 'Invalid URL format' });
     }
     
+    // Scan configuration options
+    const scanOptions = {
+      maxPages: options.maxPages || (process.env.NODE_ENV === 'production' ? 50 : 100),
+      maxLinks: options.maxLinks || 25,
+      includeButtons: options.includeButtons !== false, // Default true
+      useSitemap: options.useSitemap !== false, // Default true
+      timeout: options.timeout || 30000,
+      comprehensive: options.comprehensive !== false // Default true for comprehensive scanning
+    };
+    
     const scan = {
       id: scanId,
       status: 'running',
       progress: 0,
       url,
+      options: scanOptions,
       startTime: new Date(),
       results: null
     };
@@ -56,7 +67,7 @@ app.post('/api/scan', async (req, res) => {
     activeScans.set(scanId, scan);
     
     // Start scanning in background with better error handling
-    scanWebsite(url, scanId).catch(error => {
+    scanWebsite(url, scanId, scanOptions).catch(error => {
       console.error(`❌ Background scan error for ${scanId}:`, error);
       const failedScan = activeScans.get(scanId);
       if (failedScan) {
@@ -66,7 +77,7 @@ app.post('/api/scan', async (req, res) => {
       }
     });
     
-    res.json({ scanId, status: 'started' });
+    res.json({ scanId, status: 'started', options: scanOptions });
   } catch (error) {
     console.error('❌ POST /api/scan error:', error);
     res.status(500).json({ error: 'Internal server error', message: error.message });
@@ -111,7 +122,7 @@ app.get('/api/scan', (req, res) => {
   }
 });
 
-async function scanWebsite(baseUrl, scanId) {
+async function scanWebsite(baseUrl, scanId, options = {}) {
   let browser;
   const scan = activeScans.get(scanId);
   
@@ -226,10 +237,17 @@ async function scanWebsite(baseUrl, scanId) {
     const pagesToCrawl = ['/'];
     let processedPages = 0;
     
-    // Update progress
+    // Update progress with better calculation for comprehensive scans
     const updateProgress = () => {
-      scan.progress = Math.min(90, (processedPages / Math.max(visitedPages.size + pagesToCrawl.length, 1)) * 100);
+      const totalExpected = Math.max(visitedPages.size + pagesToCrawl.length, 10);
+      const progressPercent = Math.min(90, (processedPages / totalExpected) * 100);
+      scan.progress = progressPercent;
       scan.status = 'running';
+      
+      // Add progress details to logs every 10 pages
+      if (processedPages % 10 === 0 && processedPages > 0) {
+        addLog(`📊 Progress: ${processedPages} pages scanned, ${pagesToCrawl.length} in queue`, 'info');
+      }
     };
     
     async function crawlPage(pageUrl) {
@@ -286,37 +304,94 @@ async function scanWebsite(baseUrl, scanId) {
             await new Promise(resolve => setTimeout(resolve, waitTime));
             addLog(`✅ Page loaded successfully`, 'success');
             
-            // Test fewer links in production to save time and memory
-            const linkLimit = process.env.NODE_ENV === 'production' ? 5 : 10;
+            // Try to find sitemap.xml for comprehensive page discovery
+            if (processedPages === 1) { // Only try on first page
+              try {
+                const sitemapUrl = new URL('/sitemap.xml', baseUrl).href;
+                const sitemapResponse = await fetch(sitemapUrl, { 
+                  timeout: 5000,
+                  headers: { 'User-Agent': 'Mozilla/5.0 WebScanner Bot' }
+                });
+                
+                if (sitemapResponse.ok) {
+                  addLog(`📋 Found sitemap.xml, extracting URLs`, 'info');
+                  const sitemapText = await sitemapResponse.text();
+                  
+                  // Simple regex to extract URLs from sitemap
+                  const urlMatches = sitemapText.match(/<loc>(.*?)<\/loc>/g);
+                  if (urlMatches) {
+                    const sitemapUrls = urlMatches
+                      .map(match => match.replace(/<\/?loc>/g, ''))
+                      .filter(url => {
+                        try {
+                          const urlObj = new URL(url);
+                          const baseUrlObj = new URL(baseUrl);
+                          return urlObj.hostname === baseUrlObj.hostname;
+                        } catch {
+                          return false;
+                        }
+                      })
+                      .map(url => new URL(url).pathname + new URL(url).search)
+                      .filter(path => !visitedPages.has(path) && !pagesToCrawl.includes(path));
+                    
+                    // Add first 50 sitemap URLs to crawl queue
+                    sitemapUrls.slice(0, 50).forEach(path => {
+                      pagesToCrawl.push(path);
+                    });
+                    
+                    addLog(`📋 Added ${Math.min(sitemapUrls.length, 50)} URLs from sitemap`, 'success');
+                  }
+                }
+              } catch (error) {
+                addLog(`⚠️ Could not fetch sitemap.xml: ${error.message}`, 'warning');
+              }
+            }
             
-            // Test links with better error handling
+            // Enhanced link discovery with configurable limits
             let links = [];
             try {
               links = await page.evaluate((baseUrl, limit) => {
                   const allLinks = Array.from(document.querySelectorAll('a[href]'));
-                  return allLinks
-                  .map(link => link.getAttribute('href'))
-                  .filter(href => {
-                      if (!href || href.startsWith('#') || href.startsWith('javascript:') || 
-                          href.startsWith('mailto:') || href.startsWith('tel:')) return false;
+                  const processedLinks = [];
+                  
+                  for (const link of allLinks) {
+                    try {
+                      let href = link.getAttribute('href');
+                      if (!href) continue;
                       
-                      try {
-                        if (href.startsWith('/')) {
-                            const baseUrlObj = new URL(baseUrl);
-                            href = baseUrlObj.origin + href;
-                        } else if (!href.startsWith('http')) {
-                            href = new URL(href, baseUrl).href;
-                        }
-                        
-                        const linkUrl = new URL(href);
-                        const baseUrlObj = new URL(baseUrl);
-                        return linkUrl.hostname === baseUrlObj.hostname;
-                      } catch {
-                          return false;
+                      // Skip non-navigational links
+                      if (href.startsWith('#') || href.startsWith('javascript:') || 
+                          href.startsWith('mailto:') || href.startsWith('tel:') ||
+                          href.startsWith('sms:') || href.startsWith('ftp:')) {
+                        continue;
                       }
-                  })
-                  .filter((href, index, array) => array.indexOf(href) === index)
-                  .slice(0, limit); // Limit in the browser
+                      
+                      // Convert relative URLs to absolute
+                      if (href.startsWith('/')) {
+                        const baseUrlObj = new URL(baseUrl);
+                        href = baseUrlObj.origin + href;
+                      } else if (!href.startsWith('http')) {
+                        href = new URL(href, baseUrl).href;
+                      }
+                      
+                      // Only include links from the same domain
+                      const linkUrl = new URL(href);
+                      const baseUrlObj = new URL(baseUrl);
+                      
+                      if (linkUrl.hostname === baseUrlObj.hostname) {
+                        // Clean up the URL (remove fragments, normalize)
+                        const cleanUrl = linkUrl.origin + linkUrl.pathname + linkUrl.search;
+                        processedLinks.push(cleanUrl);
+                      }
+                    } catch (e) {
+                      // Skip invalid URLs
+                      continue;
+                    }
+                  }
+                  
+                  // Remove duplicates and return limited set
+                  const uniqueLinks = [...new Set(processedLinks)];
+                  return uniqueLinks.slice(0, limit);
               }, baseUrl, linkLimit);
             } catch (error) {
               addLog(`❌ Error extracting links: ${error.message}`, 'error');
@@ -360,6 +435,29 @@ async function scanWebsite(baseUrl, scanId) {
                       });
                   } else {
                       allIssues.workingLinks.push({ page: fullUrl, link });
+                      
+                      // Add working internal links to crawl queue for comprehensive scanning
+                      try {
+                          const linkUrl = new URL(link);
+                          const baseUrlObj = new URL(baseUrl);
+                          
+                          if (linkUrl.hostname === baseUrlObj.hostname) {
+                              const relativePath = linkUrl.pathname + linkUrl.search;
+                              const cleanPath = relativePath.endsWith('/') ? relativePath.slice(0, -1) : relativePath;
+                              
+                              // Add to crawl queue if not already visited or queued
+                              if (!visitedPages.has(relativePath) && 
+                                  !visitedPages.has(cleanPath) && 
+                                  !pagesToCrawl.includes(relativePath) &&
+                                  !pagesToCrawl.includes(cleanPath)) {
+                                  
+                                  pagesToCrawl.push(relativePath);
+                                  addLog(`🔍 Added to crawl queue: ${relativePath}`, 'info');
+                              }
+                          }
+                      } catch (e) {
+                          // Ignore URL parsing errors
+                      }
                   }
               } catch (error) {
                   if (error.name !== 'AbortError') {
@@ -403,20 +501,50 @@ async function scanWebsite(baseUrl, scanId) {
         addLog(`✅ Completed: ${fullUrl}`, 'success');
     }
     
-    // Limit pages for production
-    const pageLimit = process.env.NODE_ENV === 'production' ? 3 : 5;
+    // Limit pages for comprehensive scanning based on options
+    const pageLimit = options.maxPages || (process.env.NODE_ENV === 'production' ? 50 : 100);
+    const linkLimit = options.maxLinks || 25;
     
-    // Crawl pages
-    while (pagesToCrawl.length > 0 && visitedPages.size < pageLimit) {
+    addLog(`🎯 Scan configuration: maxPages=${pageLimit}, maxLinks=${linkLimit}, comprehensive=${options.comprehensive}`, 'info');
+    
+    // Crawl pages - COMPREHENSIVE SCANNING
+    let consecutiveErrors = 0;
+    const maxConsecutiveErrors = 5;
+    
+    while (pagesToCrawl.length > 0 && visitedPages.size < pageLimit && consecutiveErrors < maxConsecutiveErrors) {
       const currentUrl = pagesToCrawl.shift();
-      await crawlPage(currentUrl);
       
-      // Add memory check
-      const memUsage = process.memoryUsage().heapUsed / 1024 / 1024;
-      if (memUsage > 400) { // Stop if using more than 400MB
-        addLog(`⚠️ Memory usage high (${Math.round(memUsage)}MB), stopping scan`, 'warning');
-        break;
+      try {
+        await crawlPage(currentUrl);
+        consecutiveErrors = 0; // Reset error counter on success
+      } catch (error) {
+        consecutiveErrors++;
+        addLog(`❌ Failed to crawl ${currentUrl}: ${error.message}`, 'error');
+        
+        if (consecutiveErrors >= maxConsecutiveErrors) {
+          addLog(`⚠️ Too many consecutive errors (${consecutiveErrors}), stopping scan`, 'warning');
+          break;
+        }
       }
+      
+      // Add memory and time checks but be more lenient
+      const memUsage = process.memoryUsage().heapUsed / 1024 / 1024;
+      const scanDuration = Date.now() - new Date(scan.startTime).getTime();
+      
+      if (memUsage > 800) { // Increased memory limit
+        addLog(`⚠️ Memory usage high (${Math.round(memUsage)}MB), continuing with caution`, 'warning');
+        // Continue instead of breaking - just log the warning
+      }
+      
+      if (scanDuration > 10 * 60 * 1000) { // 10 minute time limit
+        addLog(`⏱️ Scan running for ${Math.round(scanDuration/1000/60)} minutes, continuing...`, 'info');
+      }
+      
+      // Add a small delay between pages to prevent overwhelming the server
+      await delay(500);
+      
+      // Update progress more frequently
+      updateProgress();
     }
     
     // Generate summary
