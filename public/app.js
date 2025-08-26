@@ -25,6 +25,7 @@ class WebsiteTester {
             });
         });
     }
+    
     switchTab(tabName) {
         // Update active button
         document.querySelectorAll('.tab-button').forEach(btn => {
@@ -95,6 +96,7 @@ class WebsiteTester {
         try {
             console.log('Starting scan for:', url);
             
+            // Keep your original fetch - just add better error handling
             const response = await fetch('/api/scan', {
                 method: 'POST',
                 headers: { 
@@ -105,7 +107,6 @@ class WebsiteTester {
                     url, 
                     scanId: this.currentScanId,
                     options: {
-                        comprehensive: true,
                         testDepth: 'deep',
                         maxPages: 100,
                         maxLinks: 50,
@@ -197,7 +198,7 @@ class WebsiteTester {
                 } else if (scan.status === 'completed') {
                     clearInterval(this.pollInterval);
                     document.getElementById('progressSection').classList.add('hidden');
-                    this.displayComprehensiveResults(scan.results);
+                    this.displayResults(scan.results);
                     this.showNotification('Scan completed successfully!', 'success');
                 } else if (scan.status === 'error') {
                     clearInterval(this.pollInterval);
@@ -305,7 +306,7 @@ class WebsiteTester {
         }
     }
     
-    displayComprehensiveResults(results) {
+    displayResults(results) {
         const { summary, issues } = results;
         
         // Animate all counters
@@ -398,13 +399,8 @@ class WebsiteTester {
                         summary.authIssuesCount
                     ],
                     backgroundColor: [
-                        '#10B981', // green - working links
-                        '#EF4444', // red - broken links
-                        '#3B82F6', // blue - working buttons
-                        '#F59E0B', // yellow - broken buttons
-                        '#8B5CF6', // purple - SEO issues
-                        '#F97316', // orange - performance issues
-                        '#EC4899'  // pink - auth issues
+                        '#10B981', '#EF4444', '#3B82F6', '#F59E0B', 
+                        '#8B5CF6', '#F97316', '#EC4899'
                     ],
                     borderWidth: 0,
                     hoverOffset: 10
@@ -452,9 +448,9 @@ class WebsiteTester {
                     data: chartData,
                     backgroundColor: function(context) {
                         const value = context.parsed.y;
-                        if (value > 3000) return '#EF4444'; // red - slow
-                        if (value > 1500) return '#F59E0B'; // orange - medium
-                        return '#10B981'; // green - fast
+                        if (value > 3000) return '#EF4444';
+                        if (value > 1500) return '#F59E0B';
+                        return '#10B981';
                     },
                     borderColor: '#ffffff',
                     borderWidth: 1,
@@ -465,9 +461,7 @@ class WebsiteTester {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    legend: {
-                        labels: { color: '#ffffff' }
-                    },
+                    legend: { labels: { color: '#ffffff' } },
                     tooltip: {
                         callbacks: {
                             title: function(context) {
@@ -486,20 +480,12 @@ class WebsiteTester {
                 },
                 scales: {
                     x: {
-                        title: {
-                            display: true,
-                            text: 'Page Number',
-                            color: '#ffffff'
-                        },
+                        title: { display: true, text: 'Page Number', color: '#ffffff' },
                         ticks: { color: '#ffffff' },
                         grid: { color: 'rgba(255, 255, 255, 0.1)' }
                     },
                     y: {
-                        title: {
-                            display: true,
-                            text: 'First Contentful Paint (ms)',
-                            color: '#ffffff'
-                        },
+                        title: { display: true, text: 'First Contentful Paint (ms)', color: '#ffffff' },
                         ticks: { color: '#ffffff' },
                         grid: { color: 'rgba(255, 255, 255, 0.1)' }
                     }
@@ -511,7 +497,7 @@ class WebsiteTester {
     displayBrokenLinks(brokenLinks) {
         const container = document.getElementById('brokenLinksList');
         
-        if (brokenLinks.length === 0) {
+        if (!brokenLinks || brokenLinks.length === 0) {
             container.innerHTML = `
                 <div class="text-center py-8">
                     <i class="fas fa-check-circle text-6xl text-green-400 mb-4"></i>
@@ -523,7 +509,7 @@ class WebsiteTester {
         }
         
         container.innerHTML = brokenLinks.slice(0, 20).map((link, index) => `
-            <div class="bg-red-500/10 border border-red-500/20 rounded-xl p-4 hover:bg-red-500/20 transition-all duration-300" style="animation-delay: ${index * 50}ms;">
+            <div class="bg-red-500/10 border border-red-500/20 rounded-xl p-4 hover:bg-red-500/20 transition-all duration-300">
                 <div class="flex items-start gap-3">
                     <i class="fas fa-unlink text-red-400 mt-1"></i>
                     <div class="flex-1 min-w-0">
@@ -537,20 +523,12 @@ class WebsiteTester {
                 </div>
             </div>
         `).join('');
-        
-        if (brokenLinks.length > 20) {
-            container.innerHTML += `
-                <div class="text-center py-4">
-                    <p class="text-gray-400">... and ${brokenLinks.length - 20} more broken links</p>
-                </div>
-            `;
-        }
     }
     
     displayBrokenButtons(brokenButtons) {
         const container = document.getElementById('brokenButtonsList');
         
-        if (brokenButtons.length === 0) {
+        if (!brokenButtons || brokenButtons.length === 0) {
             container.innerHTML = `
                 <div class="text-center py-8">
                     <i class="fas fa-check-circle text-6xl text-green-400 mb-4"></i>
@@ -562,19 +540,13 @@ class WebsiteTester {
         }
         
         container.innerHTML = brokenButtons.slice(0, 15).map((btn, index) => `
-            <div class="bg-orange-500/10 border border-orange-500/20 rounded-xl p-4 hover:bg-orange-500/20 transition-all duration-300" style="animation-delay: ${index * 50}ms;">
+            <div class="bg-orange-500/10 border border-orange-500/20 rounded-xl p-4 hover:bg-orange-500/20 transition-all duration-300">
                 <div class="flex items-start gap-3">
                     <i class="fas fa-exclamation-triangle text-orange-400 mt-1"></i>
                     <div class="flex-1 min-w-0">
                         <p class="font-medium text-orange-300">"${btn.button}"</p>
-                        <p class="text-sm text-gray-400 mt-1">
-                            <i class="fas fa-map-marker-alt text-blue-400 mr-1"></i>
-                            Page: ${btn.page}
-                        </p>
-                        <p class="text-sm text-red-400 mt-1">
-                            <i class="fas fa-bug text-red-400 mr-1"></i>
-                            Error: ${btn.errors[0]}
-                        </p>
+                        <p class="text-sm text-gray-400 mt-1">Page: ${btn.page}</p>
+                        <p class="text-sm text-red-400 mt-1">Error: ${Array.isArray(btn.errors) ? btn.errors[0] : btn.errors}</p>
                     </div>
                 </div>
             </div>
@@ -584,7 +556,7 @@ class WebsiteTester {
     displaySEOIssues(seoIssues) {
         const container = document.getElementById('seoIssuesList');
         
-        if (seoIssues.length === 0) {
+        if (!seoIssues || seoIssues.length === 0) {
             container.innerHTML = `
                 <div class="text-center py-8">
                     <i class="fas fa-trophy text-6xl text-green-400 mb-4"></i>
@@ -596,7 +568,7 @@ class WebsiteTester {
         }
         
         container.innerHTML = seoIssues.slice(0, 15).map((seo, index) => `
-            <div class="bg-green-500/10 border border-green-500/20 rounded-xl p-4 hover:bg-green-500/20 transition-all duration-300" style="animation-delay: ${index * 50}ms;">
+            <div class="bg-green-500/10 border border-green-500/20 rounded-xl p-4 hover:bg-green-500/20 transition-all duration-300">
                 <div class="flex items-start gap-3">
                     <i class="fas fa-search text-green-400 mt-1"></i>
                     <div class="flex-1 min-w-0">
@@ -618,7 +590,7 @@ class WebsiteTester {
     displayPerformanceData(performanceData) {
         const container = document.getElementById('performanceList');
         
-        if (performanceData.length === 0) {
+        if (!performanceData || performanceData.length === 0) {
             container.innerHTML = `
                 <div class="text-center py-8">
                     <i class="fas fa-clock text-6xl text-gray-400 mb-4"></i>
@@ -629,17 +601,14 @@ class WebsiteTester {
             return;
         }
         
-        // Sort by performance (slowest first)
         const sortedData = performanceData.sort((a, b) => (b.firstContentfulPaint || 0) - (a.firstContentfulPaint || 0));
         
         container.innerHTML = sortedData.slice(0, 15).map((perf, index) => {
             const fcp = perf.firstContentfulPaint || 0;
             const isSlowLoading = fcp > 3000;
-            const isLargeDOM = perf.totalElements > 1500;
-            const isLargePage = perf.pageSize > 2000;
             
             return `
-                <div class="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-4 hover:bg-yellow-500/20 transition-all duration-300" style="animation-delay: ${index * 50}ms;">
+                <div class="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-4 hover:bg-yellow-500/20 transition-all duration-300">
                     <div class="flex items-start gap-3">
                         <i class="fas fa-tachometer-alt text-yellow-400 mt-1"></i>
                         <div class="flex-1 min-w-0">
@@ -649,30 +618,7 @@ class WebsiteTester {
                                     <p class="text-gray-400 text-xs">First Paint</p>
                                     <p class="text-white font-semibold ${isSlowLoading ? 'text-red-400' : 'text-green-400'}">${Math.round(fcp)}ms</p>
                                 </div>
-                                <div class="bg-black/20 rounded-lg p-2">
-                                    <p class="text-gray-400 text-xs">DOM Size</p>
-                                    <p class="text-white font-semibold ${isLargeDOM ? 'text-red-400' : 'text-green-400'}">${perf.totalElements} elements</p>
-                                </div>
-                                <div class="bg-black/20 rounded-lg p-2">
-                                    <p class="text-gray-400 text-xs">Page Size</p>
-                                    <p class="text-white font-semibold ${isLargePage ? 'text-red-400' : 'text-green-400'}">${perf.pageSize || 0}KB</p>
-                                </div>
-                                <div class="bg-black/20 rounded-lg p-2">
-                                    <p class="text-gray-400 text-xs">Images</p>
-                                    <p class="text-white font-semibold">${perf.totalImages || 0}</p>
-                                </div>
                             </div>
-                            ${(isSlowLoading || isLargeDOM || isLargePage) ? `
-                                <div class="mt-3 p-3 bg-yellow-500/10 rounded-lg">
-                                    <p class="text-sm text-yellow-300">
-                                        <i class="fas fa-lightbulb text-yellow-400 mr-1"></i>
-                                        <strong>Recommendations:</strong> 
-                                        ${isSlowLoading ? 'Optimize loading speed. ' : ''}
-                                        ${isLargeDOM ? 'Reduce DOM complexity. ' : ''}
-                                        ${isLargePage ? 'Compress images and assets. ' : ''}
-                                    </p>
-                                </div>
-                            ` : ''}
                         </div>
                     </div>
                 </div>
@@ -683,7 +629,7 @@ class WebsiteTester {
     displayFormsData(formsData) {
         const container = document.getElementById('formsList');
         
-        if (formsData.length === 0) {
+        if (!formsData || formsData.length === 0) {
             container.innerHTML = `
                 <div class="text-center py-8">
                     <i class="fas fa-file-text text-6xl text-gray-400 mb-4"></i>
@@ -695,21 +641,12 @@ class WebsiteTester {
         }
         
         container.innerHTML = formsData.slice(0, 10).map((form, index) => `
-            <div class="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 hover:bg-blue-500/20 transition-all duration-300" style="animation-delay: ${index * 50}ms;">
+            <div class="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 hover:bg-blue-500/20 transition-all duration-300">
                 <div class="flex items-start gap-3">
                     <i class="fas fa-file-text text-blue-400 mt-1"></i>
                     <div class="flex-1 min-w-0">
                         <p class="font-medium text-blue-300 break-all">${form.link}</p>
-                        <p class="text-sm text-gray-400 mt-1">
-                            <i class="fas fa-map-marker-alt text-blue-400 mr-1"></i>
-                            Found on: ${form.page}
-                        </p>
-                        <div class="mt-2 p-3 bg-blue-500/10 rounded-lg">
-                            <p class="text-sm text-blue-300">
-                                <i class="fas fa-check-circle text-green-400 mr-1"></i>
-                                Form endpoint is accessible and responding correctly
-                            </p>
-                        </div>
+                        <p class="text-sm text-gray-400 mt-1">Found on: ${form.page}</p>
                     </div>
                 </div>
             </div>
@@ -719,7 +656,7 @@ class WebsiteTester {
     displayResourcesData(resourcesData) {
         const container = document.getElementById('resourcesList');
         
-        if (resourcesData.length === 0) {
+        if (!resourcesData || resourcesData.length === 0) {
             container.innerHTML = `
                 <div class="text-center py-8">
                     <i class="fas fa-check-circle text-6xl text-green-400 mb-4"></i>
@@ -730,71 +667,17 @@ class WebsiteTester {
             return;
         }
         
-        // Group by type
-        const groupedResources = resourcesData.reduce((acc, resource) => {
-            const type = resource.type || 'unknown';
-            if (!acc[type]) acc[type] = [];
-            acc[type].push(resource);
-            return acc;
-        }, {});
-        
-        let html = '';
-        Object.entries(groupedResources).forEach(([type, resources], groupIndex) => {
-            const typeIcon = {
-                'css': 'fab fa-css3-alt',
-                'js': 'fab fa-js-square', 
-                'image': 'fas fa-image',
-                'unknown': 'fas fa-file'
-            }[type] || 'fas fa-file';
-            
-            const typeColor = {
-                'css': 'text-blue-400',
-                'js': 'text-yellow-400',
-                'image': 'text-green-400', 
-                'unknown': 'text-gray-400'
-            }[type] || 'text-gray-400';
-            
-            html += `
-                <div class="mb-6">
-                    <h4 class="text-lg font-semibold ${typeColor} mb-3 flex items-center gap-2">
-                        <i class="${typeIcon}"></i>
-                        ${type.toUpperCase()} Resources (${resources.length})
-                    </h4>
-                    <div class="space-y-2">
-            `;
-            
-            resources.slice(0, 10).forEach((resource, index) => {
-                html += `
-                    <div class="bg-indigo-500/10 border border-indigo-500/20 rounded-lg p-3 hover:bg-indigo-500/20 transition-all duration-300" style="animation-delay: ${(groupIndex * 10 + index) * 30}ms;">
-                        <div class="flex items-start gap-3">
-                            <i class="fas fa-times-circle text-red-400 mt-1"></i>
-                            <div class="flex-1 min-w-0">
-                                <p class="font-medium text-indigo-300 break-all text-sm">${resource.resource}</p>
-                                <p class="text-xs text-gray-400 mt-1">
-                                    Status: ${resource.status} • Found on: ${resource.page}
-                                </p>
-                                ${resource.error ? `<p class="text-xs text-red-400 mt-1">Error: ${resource.error}</p>` : ''}
-                            </div>
-                        </div>
-                    </div>
-                `;
-            });
-            
-            if (resources.length > 10) {
-                html += `
-                    <div class="text-center py-2">
-                        <p class="text-gray-400 text-sm">... and ${resources.length - 10} more ${type} resources</p>
-                    </div>
-                `;
-            }
-            
-            html += `
+        container.innerHTML = resourcesData.slice(0, 10).map((resource, index) => `
+            <div class="bg-indigo-500/10 border border-indigo-500/20 rounded-lg p-3 hover:bg-indigo-500/20 transition-all duration-300">
+                <div class="flex items-start gap-3">
+                    <i class="fas fa-times-circle text-red-400 mt-1"></i>
+                    <div class="flex-1 min-w-0">
+                        <p class="font-medium text-indigo-300 break-all text-sm">${resource.resource}</p>
+                        <p class="text-xs text-gray-400 mt-1">Status: ${resource.status} • Found on: ${resource.page}</p>
                     </div>
                 </div>
-            `;
-        });
-        
-        container.innerHTML = html;
+            </div>
+        `).join('');
     }
     
     downloadReport() {
@@ -803,18 +686,13 @@ class WebsiteTester {
             return;
         }
         
-        // Enhanced report with metadata
         const enhancedReport = {
             ...this.currentResults,
             metadata: {
                 generatedAt: new Date().toISOString(),
                 tool: 'WebScan - Pro Edition',
                 version: '2.0.0',
-                scanType: 'comprehensive',
-                features: [
-                    'Link Testing', 'Button Testing', 'Form Analysis', 
-                    'Performance Monitoring', 'SEO Analysis', 'Resource Testing'
-                ]
+                scanType: 'deep'
             }
         };
         
@@ -823,7 +701,7 @@ class WebsiteTester {
         
         const link = document.createElement('a');
         link.href = URL.createObjectURL(dataBlob);
-        link.download = `webscan-pro-comprehensive-report-${new Date().toISOString().split('T')[0]}.json`;
+        link.download = `webscan-pro-report-${new Date().toISOString().split('T')[0]}.json`;
         link.click();
         
         this.showNotification('Report downloaded successfully!', 'success');
@@ -841,7 +719,7 @@ class WebsiteTester {
         let csvContent = "data:text/csv;charset=utf-8,";
         
         // Summary section
-        csvContent += "COMPREHENSIVE SCAN SUMMARY\n";
+        csvContent += "SCAN SUMMARY\n";
         csvContent += "Metric,Value\n";
         csvContent += `Total Pages Scanned,${summary.totalPages}\n`;
         csvContent += `Total Links Tested,${summary.totalLinks}\n`;
@@ -895,7 +773,7 @@ class WebsiteTester {
     }
 }
 
-// Initialize the application
+// Initialize the application - FIX: Use correct class name
 document.addEventListener('DOMContentLoaded', () => {
-    new ComprehensiveWebsiteTester();
+    new WebsiteTester(); // Changed from ComprehensiveWebsiteTester
 });
