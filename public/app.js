@@ -7,6 +7,7 @@ class WebsiteTester {
         this.initEventListeners();
         this.addEntranceAnimations();
         this.initTabs();
+        this.initScanDepthSelector();
     }
     
     addEntranceAnimations() {
@@ -24,6 +25,152 @@ class WebsiteTester {
                 this.switchTab(tabName);
             });
         });
+    }
+    
+    initScanDepthSelector() {
+        const scanOptions = document.querySelectorAll('.scan-option');
+        const scanButtonText = document.getElementById('scanButtonText');
+        const scanDescription = document.getElementById('scanDescription');
+        
+        // Define scan configurations
+        this.scanConfigs = {
+            fast: {
+                name: 'Fast Scan',
+                description: 'Quick overview: basic link checking, minimal button testing, essential SEO checks',
+                options: {
+                    testDepth: 'fast',
+                    maxPages: 25,
+                    maxLinks: 10,
+                    maxButtons: 2,
+                    includeButtons: true,
+                    includeForms: false,
+                    includeResources: false,
+                    includePerformance: false,
+                    includeSEO: true,
+                    timeoutPerPage: 5000,
+                    buttonTimeout: 1000
+                }
+            },
+            balanced: {
+                name: 'Balanced Scan',
+                description: 'Comprehensive analysis: links, buttons, forms, performance, SEO, and accessibility testing',
+                options: {
+                    testDepth: 'balanced',
+                    maxPages: 75,
+                    maxLinks: 25,
+                    maxButtons: 5,
+                    includeButtons: true,
+                    includeForms: true,
+                    includeResources: true,
+                    includePerformance: true,
+                    includeSEO: true,
+                    timeoutPerPage: 8000,
+                    buttonTimeout: 2000
+                }
+            },
+            deep: {
+                name: 'Deep Scan',
+                description: 'Thorough enterprise analysis: comprehensive testing of all elements, detailed performance metrics, full accessibility audit',
+                options: {
+                    testDepth: 'deep',
+                    maxPages: 150,
+                    maxLinks: 50,
+                    maxButtons: 10,
+                    includeButtons: true,
+                    includeForms: true,
+                    includeResources: true,
+                    includePerformance: true,
+                    includeSEO: true,
+                    timeoutPerPage: 12000,
+                    buttonTimeout: 3000
+                }
+            }
+        };
+        
+        // Set initial state based on default selection (balanced)
+        this.updateScanUI('balanced');
+        
+        // Add click handlers for scan options
+        scanOptions.forEach(option => {
+            option.addEventListener('click', () => {
+                const depth = option.getAttribute('data-depth');
+                
+                // Update radio button selection
+                document.querySelectorAll('input[name="scanDepth"]').forEach(radio => {
+                    radio.checked = radio.value === depth;
+                });
+                
+                // Update visual selection
+                this.updateScanOptionStyles(depth);
+                
+                // Update scan button and description
+                this.updateScanUI(depth);
+            });
+        });
+        
+        // Handle radio button changes directly (for accessibility)
+        document.querySelectorAll('input[name="scanDepth"]').forEach(radio => {
+            radio.addEventListener('change', () => {
+                if (radio.checked) {
+                    this.updateScanOptionStyles(radio.value);
+                    this.updateScanUI(radio.value);
+                }
+            });
+        });
+    }
+    
+    updateScanOptionStyles(selectedDepth) {
+        const scanOptions = document.querySelectorAll('.scan-option');
+        
+        scanOptions.forEach(option => {
+            const depth = option.getAttribute('data-depth');
+            const cardDiv = option.querySelector('div');
+            
+            if (depth === selectedDepth) {
+                // Selected state
+                cardDiv.classList.remove('border-green-500/30', 'border-blue-500/30', 'border-purple-500/30');
+                cardDiv.classList.remove('ring-2', 'ring-blue-500/30');
+                
+                if (depth === 'fast') {
+                    cardDiv.classList.add('border-green-500/70', 'ring-2', 'ring-green-500/50');
+                } else if (depth === 'balanced') {
+                    cardDiv.classList.add('border-blue-500/70', 'ring-2', 'ring-blue-500/50');
+                } else if (depth === 'deep') {
+                    cardDiv.classList.add('border-purple-500/70', 'ring-2', 'ring-purple-500/50');
+                }
+            } else {
+                // Unselected state
+                cardDiv.classList.remove('border-green-500/70', 'border-blue-500/70', 'border-purple-500/70');
+                cardDiv.classList.remove('ring-2', 'ring-green-500/50', 'ring-blue-500/50', 'ring-purple-500/50');
+                
+                if (depth === 'fast') {
+                    cardDiv.classList.add('border-green-500/30');
+                } else if (depth === 'balanced') {
+                    cardDiv.classList.add('border-blue-500/30');
+                } else if (depth === 'deep') {
+                    cardDiv.classList.add('border-purple-500/30');
+                }
+            }
+        });
+    }
+    
+    updateScanUI(depth) {
+        const config = this.scanConfigs[depth];
+        const scanButtonText = document.getElementById('scanButtonText');
+        const scanDescription = document.getElementById('scanDescription');
+        
+        if (config) {
+            scanButtonText.textContent = `Start ${config.name}`;
+            scanDescription.innerHTML = `
+                <i class="fas fa-info-circle"></i>
+                <span>${config.description}</span>
+            `;
+        }
+    }
+    
+    getSelectedScanDepth() {
+        const checkedRadio = document.querySelector('input[name="scanDepth"]:checked');
+        return checkedRadio ? checkedRadio.value : 'balanced';
     }
     
     switchTab(tabName) {
@@ -87,6 +234,10 @@ class WebsiteTester {
             return;
         }
         
+        // Get selected scan depth and configuration
+        const selectedDepth = this.getSelectedScanDepth();
+        const scanConfig = this.scanConfigs[selectedDepth];
+        
         this.showLoadingOverlay();
         this.currentScanId = 'scan_' + Date.now();
         
@@ -95,8 +246,10 @@ class WebsiteTester {
         
         try {
             console.log('Starting scan for:', url);
+            console.log('Scan depth:', selectedDepth);
+            console.log('Scan configuration:', scanConfig.options);
             
-            // Keep your original fetch - just add better error handling
+            // Use the selected scan configuration
             const response = await fetch('/api/scan', {
                 method: 'POST',
                 headers: { 
@@ -107,14 +260,10 @@ class WebsiteTester {
                     url, 
                     scanId: this.currentScanId,
                     options: {
-                        testDepth: 'deep',
-                        maxPages: 100,
-                        maxLinks: 50,
-                        includeButtons: true,
-                        includeForms: true,
-                        includeResources: true,
-                        includePerformance: true,
-                        includeSEO: true
+                        ...scanConfig.options,
+                        // Add scan metadata
+                        scanDepth: selectedDepth,
+                        scanName: scanConfig.name
                     }
                 })
             });
@@ -193,8 +342,12 @@ class WebsiteTester {
                 this.updateLogs(scan.logs || []);
                 
                 if (scan.status === 'running') {
+                    const selectedDepth = this.getSelectedScanDepth();
+                    const config = this.scanConfigs[selectedDepth];
+                    const scanName = config ? config.name : 'Scanning';
+                    
                     document.getElementById('progressStatus').innerHTML = 
-                        `<i class="fas fa-circle-notch animate-spin text-blue-400"></i> Deep scanning: pages, links, buttons, forms, performance, SEO... ${Math.round(scan.progress)}% complete`;
+                        `<i class="fas fa-circle-notch animate-spin text-blue-400"></i> ${scanName} in progress: analyzing pages, links, and functionality... ${Math.round(scan.progress)}% complete`;
                 } else if (scan.status === 'completed') {
                     clearInterval(this.pollInterval);
                     document.getElementById('progressSection').classList.add('hidden');

@@ -43,64 +43,18 @@ app.post('/api/scan', async (req, res) => {
       return res.status(400).json({ error: 'Invalid URL format' });
     }
     
-    // Enhanced scan configuration with depth-specific defaults
-    const isProduction = process.env.NODE_ENV === 'production';
-    const scanDepth = options.scanDepth || options.testDepth || 'balanced';
-    
-    // Apply scan depth configurations
-    let depthConfig = {};
-    switch (scanDepth) {
-      case 'fast':
-        depthConfig = {
-          maxPages: options.maxPages || (isProduction ? 25 : 25),
-          maxLinks: options.maxLinks || 10,
-          maxButtons: options.maxButtons || 2,
-          includeButtons: options.includeButtons !== false,
-          includeForms: options.includeForms !== undefined ? options.includeForms : false,
-          includeResources: options.includeResources !== undefined ? options.includeResources : false,
-          includePerformance: options.includePerformance !== undefined ? options.includePerformance : false,
-          includeSEO: options.includeSEO !== false,
-          timeoutPerPage: options.timeoutPerPage || 5000,
-          buttonTimeout: options.buttonTimeout || 1000
-        };
-        break;
-      case 'deep':
-        depthConfig = {
-          maxPages: options.maxPages || (isProduction ? 100 : 150),
-          maxLinks: options.maxLinks || 50,
-          maxButtons: options.maxButtons || 10,
-          includeButtons: options.includeButtons !== false,
-          includeForms: options.includeForms !== false,
-          includeResources: options.includeResources !== false,
-          includePerformance: options.includePerformance !== false,
-          includeSEO: options.includeSEO !== false,
-          timeoutPerPage: options.timeoutPerPage || 12000,
-          buttonTimeout: options.buttonTimeout || 3000
-        };
-        break;
-      default: // 'balanced'
-        depthConfig = {
-          maxPages: options.maxPages || (isProduction ? 50 : 75),
-          maxLinks: options.maxLinks || 25,
-          maxButtons: options.maxButtons || 5,
-          includeButtons: options.includeButtons !== false,
-          includeForms: options.includeForms !== false,
-          includeResources: options.includeResources !== false,
-          includePerformance: options.includePerformance !== false,
-          includeSEO: options.includeSEO !== false,
-          timeoutPerPage: options.timeoutPerPage || 8000,
-          buttonTimeout: options.buttonTimeout || 2000
-        };
-    }
-    
+    // Scan configuration options
     const scanOptions = {
-      ...depthConfig,
-      useSitemap: options.useSitemap !== false,
+      maxPages: options.maxPages || (process.env.NODE_ENV === 'production' ? 100 : 200),
+      maxLinks: options.maxLinks || 50, 
+      includeButtons: options.includeButtons !== false, 
+      includeForms: options.includeForms !== false, 
+      includeResources: options.includeResources !== false, 
+      includePerformance: options.includePerformance !== false, 
+      useSitemap: options.useSitemap !== false, 
       timeout: options.timeout || 30000,
-      comprehensive: options.comprehensive !== false,
-      testDepth: scanDepth,
-      scanDepth: scanDepth,
-      scanName: options.scanName || `${scanDepth.charAt(0).toUpperCase() + scanDepth.slice(1)} Scan`
+      comprehensive: options.comprehensive !== false,  
+      testDepth: options.testDepth || 'deep' // shallow, normal, deep
     };
     
     const scan = {
@@ -110,17 +64,7 @@ app.post('/api/scan', async (req, res) => {
       url,
       options: scanOptions,
       startTime: new Date(),
-      results: null,
-      // Enhanced section-specific tracking
-      sectionProgress: {
-        links: { status: 'pending', progress: 0, completed: false, total: 0, tested: 0 },
-        buttons: { status: 'pending', progress: 0, completed: false, total: 0, tested: 0 },
-        seo: { status: 'pending', progress: 0, completed: false, total: 0, tested: 0 },
-        performance: { status: 'pending', progress: 0, completed: false, total: 0, tested: 0 },
-        forms: { status: 'pending', progress: 0, completed: false, total: 0, tested: 0 },
-        resources: { status: 'pending', progress: 0, completed: false, total: 0, tested: 0 }
-      },
-      logs: []
+      results: null
     };
     
     activeScans.set(scanId, scan);
@@ -189,59 +133,6 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
     console.log(`Scan ${scanId} not found in activeScans`);
     return;
   }
-  
-  // ENHANCED SECTION TRACKING HELPERS
-  const updateSectionProgress = (section, tested, total, status = 'running') => {
-    if (scan && scan.sectionProgress && scan.sectionProgress[section]) {
-      scan.sectionProgress[section].tested = tested;
-      scan.sectionProgress[section].total = total;
-      scan.sectionProgress[section].progress = total > 0 ? Math.round((tested / total) * 100) : 0;
-      scan.sectionProgress[section].status = status;
-      scan.sectionProgress[section].completed = status === 'completed';
-    }
-  };
-  
-  const completeSectionWithLog = (section, tested, issues, type = 'success') => {
-    const timestamp = new Date().toLocaleTimeString('en-GB', { hour12: false });
-    let message = '';
-    
-    switch (section) {
-      case 'links':
-        message = `Links scan completed - ${tested} links tested, ${issues} broken`;
-        break;
-      case 'buttons':
-        message = `Buttons scan completed - ${tested} buttons tested, ${issues} issues found`;
-        break;
-      case 'seo':
-        message = `SEO scan completed - ${tested} pages analyzed, ${issues} issues found`;
-        break;
-      case 'performance':
-        message = `Performance scan completed - ${tested} pages analyzed, ${issues} slow pages`;
-        break;
-      case 'forms':
-        message = `Forms scan completed - ${tested} forms found, ${issues} issues`;
-        break;
-      case 'resources':
-        message = `Resources scan completed - ${tested} resources checked, ${issues} missing`;
-        break;
-    }
-    
-    updateSectionProgress(section, tested, tested, 'completed');
-    addLog(`✅ [${timestamp}] ${message}`, type);
-    
-    // Log to console with timestamp
-    console.log(`[${scanId}] ✅ [${timestamp}] ${message}`);
-  };
-  
-  const startSectionWithLog = (section, estimated) => {
-    const timestamp = new Date().toLocaleTimeString('en-GB', { hour12: false });
-    const sectionName = section.charAt(0).toUpperCase() + section.slice(1);
-    
-    updateSectionProgress(section, 0, estimated, 'running');
-    addLog(`🔄 [${timestamp}] Starting ${sectionName} analysis...`, 'info');
-    
-    console.log(`[${scanId}] 🔄 [${timestamp}] Starting ${sectionName} analysis...`);
-  };
   
   // FIXED: Reset logs array for each new scan to prevent accumulation
   scan.logs = [];
@@ -426,17 +317,6 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
             const waitTime = isRenderProduction ? 1000 : 2000;
             await new Promise(resolve => setTimeout(resolve, waitTime));
             addLog(` Page loaded successfully`, 'success');
-            
-            // Initialize section tracking for this page
-            if (processedPages === 1) {
-              // Start sections on first page - estimate totals
-              startSectionWithLog('links', linkLimit * Math.min(pageLimit, 10));
-              if (options.includeButtons) startSectionWithLog('buttons', maxButtonsPerPage * Math.min(pageLimit, 10));
-              if (options.includeSEO) startSectionWithLog('seo', Math.min(pageLimit, 20));
-              if (options.includePerformance) startSectionWithLog('performance', Math.min(pageLimit, 20));
-              if (options.includeForms) startSectionWithLog('forms', 10); // Estimated
-              if (options.includeResources) startSectionWithLog('resources', 50); // Estimated
-            }
                         // Try to find sitemap.xml for page discovery
             if (processedPages === 1) { // Only try on first page
               await discoverAdditionalPages(baseUrl, pagesToCrawl, visitedPages, addLog);
@@ -595,15 +475,6 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
             
             // Test each link with environment-specific timeouts
             let brokenLinksOnPage = 0;
-            let linksTestedTotal = 0;
-            
-            // Update section progress for links
-            updateSectionProgress('links', 
-              (allIssues.brokenLinks.length + allIssues.workingLinks.length), 
-              linkLimit * Math.min(pageLimit, 10), 
-              'running'
-            );
-            
             for (const link of links) {
               try {
                   const controller = new AbortController();
@@ -678,149 +549,42 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
               addLog(`Found ${brokenLinksOnPage} broken links`, 'warning');
             }
             
-            // ENHANCED BUTTON TESTING - Deep Analysis System
+            // Button testing - enabled for scans
             if (options.includeButtons !== false) {
-              // PERFORMANCE OPTIMIZATION: Skip button testing on certain page types
-              const shouldSkipButtonTesting = (
-                fullUrl.includes('/api/') || 
-                fullUrl.includes('.json') ||
-                fullUrl.includes('/sitemap') ||
-                fullUrl.includes('/robots.txt') ||
-                fullUrl.includes('/_next/') ||
-                fullUrl.includes('/assets/') ||
-                fullUrl.endsWith('.xml') ||
-                fullUrl.endsWith('.txt') ||
-                processedPages > 20 // Skip button testing after 20 pages
-              );
-              
-              if (shouldSkipButtonTesting) {
-                addLog(` Skipping button testing for performance (API/resource page or limit reached)`, 'info');
-              } else {
               let buttons = [];
-              
-              // INJECT UTILITY FUNCTIONS for better element selection
-              try {
-                await page.evaluateOnNewDocument(() => {
-                  // Generate XPath for element
-                  window.getElementXPath = function(element) {
-                    if (!element || !element.tagName) return null;
-                    if (element.id !== '') {
-                      return `id("${element.id}")`;
-                    }
-                    if (element === document.body) {
-                      return element.tagName;
-                    }
-                    let ix = 0;
-                    const siblings = element.parentNode ? element.parentNode.childNodes : [];
-                    for (let i = 0; i < siblings.length; i++) {
-                      const sibling = siblings[i];
-                      if (sibling === element) {
-                        const parentXPath = window.getElementXPath(element.parentNode);
-                        return parentXPath + '/' + element.tagName + '[' + (ix + 1) + ']';
-                      }
-                      if (sibling.nodeType === 1 && sibling.tagName === element.tagName) {
-                        ix++;
-                      }
-                    }
-                    return null;
-                  };
-                  
-                  // Generate CSS selector path with proper escaping
-                  window.getElementCSSPath = function(el) {
-                    if (!(el instanceof Element)) return null;
-                    const path = [];
-                    while (el.nodeType === Node.ELEMENT_NODE) {
-                      let selector = el.nodeName.toLowerCase();
-                      if (el.id) {
-                        // Properly escape special characters in CSS selectors
-                        const escapedId = el.id.replace(/([\\:!"#$%&'()*+,.\/:;<=>?@\[\]^`{|}~])/g, '\\\\$1');
-                        selector += '#' + escapedId;
-                        path.unshift(selector);
-                        break;
-                      } else {
-                        let sib = el, nth = 1;
-                        while (sib = sib.previousElementSibling) {
-                          if (sib.nodeName.toLowerCase() === selector) nth++;
-                        }
-                        if (nth !== 1) selector += ':nth-of-type(' + nth + ')';
-                      }
-                      path.unshift(selector);
-                      el = el.parentNode;
-                    }
-                    return path.join(' > ');
-                  };
-                  
-                  // Enhanced element visibility checker
-                  window.isElementTrulyVisible = function(el) {
-                    if (!el || !el.offsetParent) return false;
-                    const style = window.getComputedStyle(el);
-                    const rect = el.getBoundingClientRect();
-                    return (
-                      style.display !== 'none' &&
-                      style.visibility !== 'hidden' &&
-                      parseFloat(style.opacity) > 0.1 &&
-                      rect.width > 0 && rect.height > 0 &&
-                      rect.top < window.innerHeight && rect.bottom > 0
-                    );
-                  };
-                });
-              } catch (utilError) {
-                addLog(`Warning: Could not inject utility functions: ${utilError.message}`, 'warning');
-              }
-              
-              // COMPREHENSIVE BUTTON DISCOVERY
+              // BUTTON DISCOVERY
               try {
                 buttons = await page.evaluate(() => {
-                  // ENHANCED BUTTON DISCOVERY - Comprehensive patterns
                   const allButtonElements = [
                     // Standard buttons
                     ...document.querySelectorAll('button:not([disabled])'),
                     // Role-based buttons
                     ...document.querySelectorAll('[role="button"]:not([disabled])'),
-                    // Class-based buttons (expanded patterns)
+                    // Class-based buttons (common patterns)
                     ...document.querySelectorAll(`
                       .btn:not([disabled]), .button:not([disabled]), 
                       .cta:not([disabled]), .call-to-action:not([disabled]),
                       .submit:not([disabled]), .primary:not([disabled]),
-                      .secondary:not([disabled]), .action:not([disabled]),
-                      .link-button:not([disabled]), .btn-primary:not([disabled]),
-                      .btn-secondary:not([disabled]), .btn-outline:not([disabled]),
-                      .btn-ghost:not([disabled]), .btn-danger:not([disabled])
+                      .secondary:not([disabled]), .action:not([disabled])
                     `),
                     // Interactive elements with click handlers
                     ...document.querySelectorAll('[onclick]:not([disabled])'),
                     // Input buttons and submits
                     ...document.querySelectorAll('input[type="button"]:not([disabled])'),
                     ...document.querySelectorAll('input[type="submit"]:not([disabled])'),
-                    ...document.querySelectorAll('input[type="reset"]:not([disabled])'),
                     // Links that look like buttons
                     ...document.querySelectorAll(`
                       a.btn, a.button, a[role="button"], 
                       a.cta, a.call-to-action, a.primary, a.secondary
                     `),
                     // Elements with button-like data attributes
-                    ...document.querySelectorAll('[data-action], [data-click], [data-submit], [data-toggle]'),
+                    ...document.querySelectorAll('[data-action], [data-click], [data-submit]'),
                     // Form elements that might be interactive
                     ...document.querySelectorAll('label[for]:not([disabled])'),
-                    // Custom interactive elements (expanded)
+                    // Custom interactive elements
                     ...document.querySelectorAll(`
                       [class*="click"], [class*="press"], [class*="tap"],
-                      [id*="button"], [id*="btn"], [id*="submit"],
-                      [class*="toggle"], [class*="trigger"], [class*="menu"]
-                    `),
-                    // Modern UI framework elements
-                    ...document.querySelectorAll(`
-                      [data-testid*="button"], [data-testid*="btn"],
-                      [aria-expanded], [aria-haspopup], 
-                      .chakra-button, .ant-btn, .mui-button, .v-btn,
-                      .react-button, .vue-button
-                    `),
-                    // Interactive elements with tabindex (keyboard accessible)
-                    ...document.querySelectorAll('[tabindex="0"]:not(input):not(textarea):not(select)'),
-                    // Elements with ARIA roles that might be interactive
-                    ...document.querySelectorAll(`
-                      [role="menuitem"], [role="tab"], [role="option"],
-                      [role="switch"], [role="checkbox"]:not(input)
+                      [id*="button"], [id*="btn"], [id*="submit"]
                     `)
                   ];
                   
@@ -830,492 +594,129 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
                       return array.indexOf(el) === index;
                     })
                     .filter(el => {
-                      // Enhanced visibility check using our utility function
-                      return window.isElementTrulyVisible ? window.isElementTrulyVisible(el) : (
-                        el.offsetParent !== null &&
-                        window.getComputedStyle(el).display !== 'none' &&
-                        window.getComputedStyle(el).visibility !== 'hidden'
-                      );
+                      // Only visible elements
+                      const style = window.getComputedStyle(el);
+                      const rect = el.getBoundingClientRect();
+                      
+                      return style.display !== 'none' && 
+                             style.visibility !== 'hidden' && 
+                             style.opacity !== '0' &&
+                             el.offsetParent !== null &&
+                             rect.width > 0 && rect.height > 0;
                     })
                     .map((el, index) => {
-                      // Extract comprehensive metadata
-                      const rect = el.getBoundingClientRect();
-                      const computedStyle = window.getComputedStyle(el);
-                      
-                      // Multiple ways to get button text/description
-                      const text = (
-                        el.textContent?.trim() || 
-                        el.value || 
-                        el.title || 
-                        el.getAttribute('aria-label') || 
-                        el.getAttribute('data-label') ||
-                        el.getAttribute('placeholder') ||
-                        el.getAttribute('alt') ||
-                        (el.className && typeof el.className === 'string' ? 
-                          el.className.split(' ').find(c => c.includes('btn') || c.includes('button')) : null) ||
-                        `${el.tagName.toLowerCase()}-${index + 1}`
-                      ).substring(0, 100); // Increased length for better identification
+                      // Extract meaningful information
+                      const text = (el.textContent || el.value || el.title || 
+                                   el.getAttribute('aria-label') || 
+                                   el.getAttribute('data-label') ||
+                                   el.className.split(' ').find(c => c.includes('btn') || c.includes('button')) ||
+                                   `Element ${index + 1}`)
+                                   .trim().substring(0, 50);
                       
                       return {
-                        // Basic identification
                         index,
-                        text: text || `Element-${index + 1}`,
-                        className: el.className || '',
-                        id: el.id || '',
+                        text: text || `Button ${index + 1}`,
+                        className: el.className,
+                        id: el.id,
                         tagName: el.tagName,
                         type: el.type || el.getAttribute('role') || 'interactive',
-                        
-                        // Interaction capabilities
                         hasOnClick: !!el.getAttribute('onclick'),
                         hasDataAction: !!(el.getAttribute('data-action') || 
                                          el.getAttribute('data-click') || 
-                                         el.getAttribute('data-submit') ||
-                                         el.getAttribute('data-toggle')),
-                        isFormElement: ['INPUT', 'BUTTON', 'LABEL', 'SELECT'].includes(el.tagName),
-                        
-                        // Enhanced metadata for better selection
-                        hasAriaExpanded: el.hasAttribute('aria-expanded'),
-                        hasAriaHaspopup: el.hasAttribute('aria-haspopup'),
-                        hasTabindex: el.hasAttribute('tabindex'),
-                        tabindexValue: el.getAttribute('tabindex'),
-                        ariaRole: el.getAttribute('role'),
-                        
-                        // Position and visibility info
-                        position: rect ? { 
-                          x: Math.round(rect.left || 0), 
-                          y: Math.round(rect.top || 0), 
-                          width: Math.round(rect.width || 0), 
-                          height: Math.round(rect.height || 0) 
-                        } : { x: 0, y: 0, width: 0, height: 0 },
-                        isInViewport: rect ? (
-                          rect.top >= 0 && rect.left >= 0 && 
-                          rect.bottom <= window.innerHeight && 
-                          rect.right <= window.innerWidth
-                        ) : false,
-                        
-                        // Selection strategies (multiple fallbacks)
-                        xpath: window.getElementXPath ? window.getElementXPath(el) : null,
-                        cssPath: window.getElementCSSPath ? window.getElementCSSPath(el) : null,
-                        
-                        // Complexity and priority scoring
-                        complexity: (el.children ? el.children.length : 0) + (el.className && typeof el.className === 'string' ? 
-                          el.className.split(' ').length : 0),
-                        priority: (
-                          (el.tagName === 'BUTTON' ? 10 : 0) +
-                          (el.getAttribute('role') === 'button' ? 8 : 0) +
-                          ((el.className && typeof el.className === 'string' && el.className.includes('btn')) ? 7 : 0) +
-                          (el.hasAttribute('onclick') ? 6 : 0) +
-                          (el.type === 'submit' ? 9 : 0) +
-                          (el.hasAttribute('data-testid') ? 5 : 0)
-                        ),
-                        
-                        // Additional attributes for debugging
-                        allAttributes: el.attributes ? Array.from(el.attributes).reduce((attrs, attr) => {
-                          if (attr && attr.name && attr.value !== undefined) {
-                            attrs[attr.name] = attr.value;
-                          }
-                          return attrs;
-                        }, {}) : {}
+                                         el.getAttribute('data-submit')),
+                        isFormElement: ['INPUT', 'BUTTON', 'LABEL'].includes(el.tagName)
                       };
                     })
-                    .filter(btn => {
-                      // Enhanced filtering with safety checks
-                      return btn && 
-                             btn.text && 
-                             typeof btn.text === 'string' && 
-                             btn.text.length > 0 && 
-                             btn.text !== 'undefined' && 
-                             btn.text.trim().length > 0;
-                    })
-                    .sort((a, b) => (b.priority || 0) - (a.priority || 0)); // Sort by priority with fallback
+                    .filter(btn => btn.text.length > 0 && btn.text !== 'undefined');
                 });
               } catch (error) {
                 addLog(`Error extracting buttons: ${error.message}`, 'error');
                 buttons = [];
               }
               
-              // ADAPTIVE TESTING STRATEGY based on page complexity
-              let pageComplexityCount = 0;
-              try {
-                pageComplexityCount = await page.$eval('*', els => els.length);
-              } catch (complexityError) {
-                // Fallback if element counting fails
-                pageComplexityCount = 500;
-                addLog(`Warning: Could not count page elements, using fallback: ${complexityError.message}`, 'warning');
-              }
-              
-              const pageComplexity = buttons.length + pageComplexityCount;
-              const complexityLevel = pageComplexity > 2000 ? 'high' : pageComplexity > 1000 ? 'medium' : 'low';
-              
-              // SCAN DEPTH AWARE TESTING LIMITS
-              const scanDepthLimits = {
-                fast: {
-                  buttons: Math.min(maxButtonsPerPage, isRenderProduction ? 1 : 2),
-                  timePerButton: Math.min(buttonTimeoutLimit, isRenderProduction ? 1000 : 1500),
-                  maxWaitTime: 500
-                },
-                balanced: {
-                  buttons: Math.min(maxButtonsPerPage, isRenderProduction ? 3 : 5),
-                  timePerButton: Math.min(buttonTimeoutLimit, isRenderProduction ? 1500 : 2000),
-                  maxWaitTime: 800
-                },
-                deep: {
-                  buttons: Math.min(maxButtonsPerPage, isRenderProduction ? 5 : 10),
-                  timePerButton: Math.min(buttonTimeoutLimit, isRenderProduction ? 2000 : 3000),
-                  maxWaitTime: 1000
-                }
-              };
-              
-              const currentScanDepth = options.scanDepth || 'balanced';
-              const baseLimits = scanDepthLimits[currentScanDepth] || scanDepthLimits.balanced;
-              
-              // Adjust based on page complexity
-              const testLimits = {
-                low: { 
-                  buttons: baseLimits.buttons,
-                  timePerButton: baseLimits.timePerButton,
-                  maxWaitTime: baseLimits.maxWaitTime
-                },
-                medium: { 
-                  buttons: Math.max(1, Math.floor(baseLimits.buttons * 0.7)),
-                  timePerButton: Math.floor(baseLimits.timePerButton * 0.8),
-                  maxWaitTime: Math.floor(baseLimits.maxWaitTime * 0.8)
-                },
-                high: { 
-                  buttons: Math.max(1, Math.floor(baseLimits.buttons * 0.5)),
-                  timePerButton: Math.floor(baseLimits.timePerButton * 0.6),
-                  maxWaitTime: Math.floor(baseLimits.maxWaitTime * 0.6)
-                }
-              };
-              
-              const limits = testLimits[complexityLevel];
-              
-              addLog(` Found ${buttons.length} buttons (complexity: ${complexityLevel}), will test top ${limits.buttons}`, 'info');
+              addLog(` Found ${buttons.length} buttons to test`, 'info');
               
               let brokenButtonsOnPage = 0;
               let authIssuesOnPage = 0;
               
-              // SOPHISTICATED BUTTON TESTING with Multi-Strategy Selection
-              const buttonResults = {
-                genuine_broken: [],
-                scanner_limitation: [],
-                auth_required: [],
-                network_timeout: [],
-                javascript_error: [],
-                working: [],
-                state_changes: []
-              };
-              
-              // Test buttons with adaptive limits
-              for (const buttonInfo of buttons.slice(0, limits.buttons)) {
+              // Test buttons (limit based on environment)
+              const buttonLimit = isRenderProduction ? 2 : 5;
+              for (const buttonInfo of buttons.slice(0, buttonLimit)) {
                 let buttonPage;
-                let testResult = {
-                  button: buttonInfo.text,
-                  page: fullUrl,
-                  classification: 'unknown',
-                  errors: [],
-                  selectionMethod: null,
-                  responseTime: 0,
-                  stateChanges: []
-                };
-                
                 try {
                   buttonPage = await browser.newPage();
                   await buttonPage.setViewport({ width: 1280, height: 720 });
                   
-                  // Enhanced error tracking
-                  const allErrors = [];
-                  const consoleMessages = [];
-                  const networkErrors = [];
-                  
+                  const buttonErrors = [];
                   buttonPage.on('console', (msg) => {
-                    const text = msg.text();
-                    consoleMessages.push({ type: msg.type(), text, timestamp: Date.now() });
-                    if (msg.type() === 'error') allErrors.push(text);
+                    if (msg.type() === 'error') buttonErrors.push(msg.text());
                   });
                   
-                  buttonPage.on('pageerror', (error) => {
-                    allErrors.push(`Page Error: ${error.message}`);
-                  });
+                  await buttonPage.goto(fullUrl, { timeout: 15000, waitUntil: 'domcontentloaded' });
+                  await new Promise(resolve => setTimeout(resolve, 1000));
                   
-                  buttonPage.on('requestfailed', (request) => {
-                    networkErrors.push(`Network: ${request.url()} - ${request.failure()?.errorText}`);
-                  });
-                  
-                  const startTime = Date.now();
-                  await buttonPage.goto(fullUrl, { 
-                    timeout: limits.timePerButton, 
-                    waitUntil: 'domcontentloaded' 
-                  });
-                  
-                  // Wait for dynamic content to load (REDUCED)
-                  await new Promise(resolve => setTimeout(resolve, 800)); // Reduced from 1500
-                  
-                  // MULTI-STRATEGY BUTTON SELECTION (Priority order)
-                  let selectedButton = null;
-                  let selectionMethod = null;
-                  
-                  // Strategy 1: ID-based selection with proper escaping
-                  if (!selectedButton && buttonInfo.id) {
-                    try {
-                      // Escape special characters in CSS selectors
-                      const escapedId = buttonInfo.id.replace(/([\\:!"#$%&'()*+,.\/:;<=>?@\[\]^`{|}~])/g, '\\\\$1');
-                      selectedButton = await buttonPage.$(`#${escapedId}`);
-                      if (selectedButton) {
-                        selectionMethod = 'escaped-id';
-                        testResult.selectionMethod = `ID (escaped): #${escapedId}`;
-                      }
-                    } catch (idError) {
-                      // ID selection failed, try next strategy
-                    }
-                  }
-                  
-                  // Strategy 2: XPath selection
-                  if (!selectedButton && buttonInfo.xpath) {
-                    try {
-                      const [xpathElement] = await buttonPage.$x(buttonInfo.xpath);
-                      if (xpathElement) {
-                        selectedButton = xpathElement;
-                        selectionMethod = 'xpath';
-                        testResult.selectionMethod = `XPath: ${buttonInfo.xpath.substring(0, 100)}`;
-                      }
-                    } catch (xpathError) {
-                      // XPath selection failed, try next strategy
-                    }
-                  }
-                  
-                  // Strategy 3: CSS Path selection
-                  if (!selectedButton && buttonInfo.cssPath) {
-                    try {
-                      selectedButton = await buttonPage.$(buttonInfo.cssPath);
-                      if (selectedButton) {
-                        selectionMethod = 'css-path';
-                        testResult.selectionMethod = `CSS Path: ${buttonInfo.cssPath.substring(0, 100)}`;
-                      }
-                    } catch (cssError) {
-                      // CSS path selection failed, try next strategy
-                    }
-                  }
-                  
-                  // Strategy 4: Text-based selection
-                  if (!selectedButton && buttonInfo.text) {
-                    try {
-                      const textSelectors = [
-                        `button:contains("${buttonInfo.text}")`,
-                        `[role="button"]:contains("${buttonInfo.text}")`,
-                        `input[value="${buttonInfo.text}"]`,
-                        `*[aria-label="${buttonInfo.text}"]`
-                      ];
-                      
-                      for (const selector of textSelectors) {
-                        try {
-                          const elements = await buttonPage.evaluateHandle((sel, text) => {
-                            const xpath = `//button[contains(text(), '${text}')] | //*[@role='button' and contains(text(), '${text}')] | //input[@value='${text}'] | //*[@aria-label='${text}']`;
-                            const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
-                            return result.singleNodeValue;
-                          }, selector, buttonInfo.text);
-                          
-                          if (elements) {
-                            selectedButton = elements;
-                            selectionMethod = 'text-content';
-                            testResult.selectionMethod = `Text-based: "${buttonInfo.text.substring(0, 50)}"`;
-                            break;
-                          }
-                        } catch (e) {
-                          // Continue to next selector
-                        }
-                      }
-                    } catch (textError) {
-                      // Text selection failed, try next strategy
-                    }
-                  }
-                  
-                  // Strategy 5: Position-based selection (last resort)
-                  if (!selectedButton && buttonInfo.position) {
-                    try {
-                      const positionSelector = `${buttonInfo.tagName.toLowerCase()}[style*="position"]`;
-                      const candidates = await buttonPage.$(positionSelector);
-                      
-                      for (const candidate of candidates) {
-                        const rect = await candidate.boundingBox();
-                        if (rect && 
-                            Math.abs(rect.x - buttonInfo.position.x) < 10 && 
-                            Math.abs(rect.y - buttonInfo.position.y) < 10) {
-                          selectedButton = candidate;
-                          selectionMethod = 'position';
-                          testResult.selectionMethod = `Position: (${buttonInfo.position.x}, ${buttonInfo.position.y})`;
-                          break;
-                        }
-                      }
-                    } catch (positionError) {
-                      // Position selection failed
-                    }
-                  }
-                  
-                  if (!selectedButton) {
-                    testResult.classification = 'scanner_limitation';
-                    testResult.errors = ['Could not locate button element with any selection strategy'];
-                    buttonResults.scanner_limitation.push(testResult);
-                    continue;
-                  }
-                  
-                  // PRE-CLICK STATE CAPTURE
-                  const preClickState = await buttonPage.evaluate(() => ({
-                    url: window.location.href,
-                    title: document.title,
-                    activeElement: document.activeElement?.tagName,
-                    modalCount: document.querySelectorAll('.modal, [role="dialog"]').length,
-                    overlayCount: document.querySelectorAll('.overlay, .backdrop').length,
-                    loadingCount: document.querySelectorAll('.loading, .spinner').length
-                  }));
-                  
-                  // ENHANCED BUTTON INTERACTION
-                  const isVisible = await selectedButton.isIntersectingViewport();
-                  if (!isVisible) {
-                    await selectedButton.scrollIntoViewIfNeeded();
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                  }
-                  
-                  // Clear previous errors before clicking
-                  allErrors.length = 0;
-                  consoleMessages.length = 0;
-                  networkErrors.length = 0;
-                  
-                  // PERFORM CLICK with timeout
-                  try {
-                    await Promise.race([
-                      selectedButton.click(),
-                      new Promise((_, reject) => 
-                        setTimeout(() => reject(new Error('Click timeout')), limits.timePerButton)
-                      )
-                    ]);
-                  } catch (clickError) {
-                    if (clickError.message === 'Click timeout') {
-                      testResult.classification = 'network_timeout';
-                      testResult.errors = ['Button click timed out'];
-                      buttonResults.network_timeout.push(testResult);
-                      continue;
-                    }
-                    throw clickError;
-                  }
-                  
-                  // OPTIMIZED STATE CHANGE DETECTION (Reduced from progressive waits)
-                  const maxWaitTime = limits.maxWaitTime || 500;
-                  let finalState = null;
-                  let stateChangeDetected = false;
-                  
-                  // Single quick check instead of progressive waits
-                  await new Promise(resolve => setTimeout(resolve, 300)); // Quick initial wait
-                  
-                  try {
-                    const currentState = await buttonPage.evaluate(() => ({
-                      url: window.location.href,
-                      title: document.title,
-                      modalCount: document.querySelectorAll('.modal, [role="dialog"]').length,
-                      overlayCount: document.querySelectorAll('.overlay, .backdrop').length,
-                      hasNewContent: document.querySelector('.toast, .notification, .alert, .success, .error') !== null
-                    }));
-                    
-                    // Quick state change detection
-                    const stateChanges = [];
-                    if (currentState.url !== preClickState.url) {
-                      stateChanges.push(`URL changed: ${preClickState.url} -> ${currentState.url}`);
-                      stateChangeDetected = true;
-                    }
-                    if (currentState.title !== preClickState.title) {
-                      stateChanges.push(`Title changed: "${preClickState.title}" -> "${currentState.title}"`);
-                      stateChangeDetected = true;
-                    }
-                    if (currentState.modalCount > preClickState.modalCount) {
-                      stateChanges.push(`Modal opened (${currentState.modalCount - preClickState.modalCount})`);
-                      stateChangeDetected = true;
-                    }
-                    if (currentState.overlayCount > preClickState.overlayCount) {
-                      stateChanges.push(`Overlay appeared (${currentState.overlayCount - preClickState.overlayCount})`);
-                      stateChangeDetected = true;
-                    }
-                    if (currentState.hasNewContent) {
-                      stateChanges.push('New notification/alert content appeared');
-                      stateChangeDetected = true;
-                    }
-                    
-                    testResult.stateChanges = stateChanges;
-                    finalState = currentState;
-                    
-                    // If no immediate changes and time allows, wait a bit more
-                    if (!stateChangeDetected && maxWaitTime > 400) {
-                      await new Promise(resolve => setTimeout(resolve, Math.min(maxWaitTime - 300, 400)));
-                      
-                      // One final check
-                      const finalCheck = await buttonPage.evaluate(() => ({
-                        url: window.location.href,
-                        title: document.title,
-                        hasNewContent: document.querySelector('.toast, .notification, .alert, .success, .error') !== null
-                      }));
-                      
-                      if (finalCheck.url !== currentState.url || finalCheck.title !== currentState.title || finalCheck.hasNewContent) {
-                        testResult.stateChanges.push('Delayed state change detected');
-                        stateChangeDetected = true;
-                      }
-                    }
-                    
-                  } catch (stateError) {
-                    // State checking failed, continue with what we have
-                    testResult.stateChanges = [];
-                  }
-                  
-                  testResult.responseTime = Date.now() - startTime;
-                  
-                  // ERROR CLASSIFICATION
-                  const authKeywords = ['401', '403', 'unauthorized', 'forbidden', 'login required', 'access denied'];
-                  const networkKeywords = ['network', 'timeout', 'connection', 'fetch', 'cors', 'net::', 'dns'];
-                  const jsKeywords = ['javascript', 'script error', 'undefined', 'null', 'reference error', 'type error'];
-                  
-                  const allErrorText = [...allErrors, ...networkErrors].join(' ').toLowerCase();
-                  
-                  if (allErrors.length === 0 && networkErrors.length === 0) {
-                    if (testResult.stateChanges.length > 0) {
-                      testResult.classification = 'working';
-                      buttonResults.working.push(testResult);
-                      buttonResults.state_changes.push({
-                        ...testResult,
-                        changes: testResult.stateChanges
-                      });
-                    } else {
-                      // No errors, but no visible state changes either
-                      testResult.classification = 'working';
-                      testResult.notes = 'Button click succeeded but no visible state changes detected';
-                      buttonResults.working.push(testResult);
-                    }
-                  } else if (authKeywords.some(keyword => allErrorText.includes(keyword))) {
-                    testResult.classification = 'auth_required';
-                    testResult.errors = allErrors.filter(error => 
-                      authKeywords.some(keyword => error.toLowerCase().includes(keyword))
-                    );
-                    buttonResults.auth_required.push(testResult);
-                  } else if (networkKeywords.some(keyword => allErrorText.includes(keyword))) {
-                    testResult.classification = 'network_timeout';
-                    testResult.errors = [...allErrors, ...networkErrors].filter(error => 
-                      networkKeywords.some(keyword => error.toLowerCase().includes(keyword))
-                    );
-                    buttonResults.network_timeout.push(testResult);
-                  } else if (jsKeywords.some(keyword => allErrorText.includes(keyword))) {
-                    testResult.classification = 'javascript_error';
-                    testResult.errors = allErrors.filter(error => 
-                      jsKeywords.some(keyword => error.toLowerCase().includes(keyword))
-                    );
-                    buttonResults.javascript_error.push(testResult);
+                  // More reliable button selection
+                  let button;
+                  if (buttonInfo.id) {
+                    button = await buttonPage.$(`#${buttonInfo.id}`);
                   } else {
-                    // Unclassified errors - likely genuine issues
-                    testResult.classification = 'genuine_broken';
-                    testResult.errors = [...allErrors, ...networkErrors];
-                    buttonResults.genuine_broken.push(testResult);
+                    const buttons = await buttonPage.$(`${buttonInfo.tagName.toLowerCase()}`);
+                    button = buttons[buttonInfo.index];
                   }
                   
+                  if (button) {
+                    const isVisible = await button.isIntersectingViewport();
+                    
+                    if (isVisible) {
+                      await button.click();
+                      await new Promise(resolve => setTimeout(resolve, 1000));
+                      
+                      const realErrors = buttonErrors.filter(e => 
+                        !e.includes('401') && !e.includes('404') && 
+                        !e.includes('Unauthorized') && !e.includes('Not Found')
+                      );
+                      
+                      if (realErrors.length > 0) {
+                        brokenButtonsOnPage++;
+                        allIssues.brokenButtons.push({
+                          page: fullUrl,
+                          button: buttonInfo.text,
+                          errors: realErrors
+                        });
+                      } else {
+                        allIssues.workingButtons.push({
+                          page: fullUrl,
+                          button: buttonInfo.text
+                        });
+                      }
+                      
+                      const authErrors = buttonErrors.filter(e => e.includes('401') || e.includes('Unauthorized'));
+                      if (authErrors.length > 0) {
+                        authIssuesOnPage++;
+                        allIssues.authErrors.push({
+                          page: fullUrl,
+                          button: buttonInfo.text,
+                          count: authErrors.length
+                        });
+                      }
+                      
+                      const resourceErrors = buttonErrors.filter(e => e.includes('404') || e.includes('Not Found'));
+                      if (resourceErrors.length > 0) {
+                        allIssues.missingResources.push({
+                          page: fullUrl,
+                          button: buttonInfo.text,
+                          count: resourceErrors.length
+                        });
+                      }
+                    }
+                  }
                 } catch (error) {
-                  testResult.classification = 'scanner_limitation';
-                  testResult.errors = [error.message];
-                  buttonResults.scanner_limitation.push(testResult);
+                  brokenButtonsOnPage++;
+                  allIssues.brokenButtons.push({
+                    page: fullUrl,
+                    button: buttonInfo.text,
+                    errors: [error.message]
+                  });
                 } finally {
                   if (buttonPage) {
                     try {
@@ -1325,94 +726,9 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
                     }
                   }
                 }
-              // AGGREGATE RESULTS with Enhanced Classification
-              const buttonSummary = {
-                total: buttons.length,
-                tested: Math.min(buttons.length, limits.buttons),
-                working: buttonResults.working.length,
-                genuine_broken: buttonResults.genuine_broken.length,
-                scanner_limitation: buttonResults.scanner_limitation.length,
-                auth_required: buttonResults.auth_required.length,
-                network_timeout: buttonResults.network_timeout.length,
-                javascript_error: buttonResults.javascript_error.length,
-                with_state_changes: buttonResults.state_changes.length
-              };
-              
-              // Update legacy format for backward compatibility
-              buttonResults.working.forEach(result => {
-                allIssues.workingButtons.push({
-                  page: result.page,
-                  button: result.button,
-                  classification: result.classification,
-                  selectionMethod: result.selectionMethod,
-                  responseTime: result.responseTime,
-                  stateChanges: result.stateChanges
-                });
-              });
-              
-              // Add genuinely broken buttons to legacy format
-              buttonResults.genuine_broken.forEach(result => {
-                allIssues.brokenButtons.push({
-                  page: result.page,
-                  button: result.button,
-                  errors: result.errors,
-                  classification: result.classification,
-                  selectionMethod: result.selectionMethod
-                });
-              });
-              
-              // Add auth issues to legacy format
-              buttonResults.auth_required.forEach(result => {
-                allIssues.authErrors.push({
-                  page: result.page,
-                  button: result.button,
-                  errors: result.errors,
-                  classification: result.classification
-                });
-              });
-              
-              // Store enhanced results
-              if (!allIssues.enhancedButtonResults) {
-                allIssues.enhancedButtonResults = [];
               }
-              allIssues.enhancedButtonResults.push({
-                page: fullUrl,
-                complexity: complexityLevel,
-                summary: buttonSummary,
-                results: buttonResults
-              });
-              
-              // ENHANCED LOGGING
-              if (buttonSummary.tested > 0) {
-                const accuracyRate = Math.round((buttonSummary.working / buttonSummary.tested) * 100);
-                addLog(` Button Analysis Complete: ${buttonSummary.tested} tested, ${buttonSummary.working} working (${accuracyRate}% success)`, 'info');
-                
-                if (buttonSummary.genuine_broken > 0) {
-                  addLog(` 🔴 ${buttonSummary.genuine_broken} genuinely broken buttons found`, 'error');
-                }
-                if (buttonSummary.auth_required > 0) {
-                  addLog(` 🟡 ${buttonSummary.auth_required} buttons require authentication`, 'warning');
-                }
-                if (buttonSummary.scanner_limitation > 0) {
-                  addLog(` 🟠 ${buttonSummary.scanner_limitation} buttons had selector issues (not site problems)`, 'warning');
-                }
-                if (buttonSummary.javascript_error > 0) {
-                  addLog(` 🟣 ${buttonSummary.javascript_error} buttons triggered JavaScript errors`, 'warning');
-                }
-                if (buttonSummary.network_timeout > 0) {
-                  addLog(` ⏱️ ${buttonSummary.network_timeout} buttons experienced network timeouts`, 'warning');
-                }
-                if (buttonSummary.with_state_changes > 0) {
-                  addLog(` ✨ ${buttonSummary.with_state_changes} buttons caused visible state changes`, 'success');
-                }
-              } else {
-                addLog(` No buttons were tested due to complexity or limits`, 'info');
-              }
-              
-            } 
-            
-            if (options.includeSEO !== false && processedPages <= 100) {
-              try {
+              if (options.includeSEO !== false && processedPages <= 100) { 
+                try {
                   const seoData = await page.evaluate(() => {
                     return {
                       title: document.title || null,
@@ -1588,7 +904,6 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
               if (authIssuesOnPage > 0) {
                 addLog(` Found ${authIssuesOnPage} authentication issues`, 'warning');
               }
-              } // End shouldSkipButtonTesting
             } else {
               addLog(`Button testing disabled`, 'info');
             }
@@ -1611,14 +926,11 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
         
         addLog(` Completed: ${fullUrl}`, 'success');
     }    
-    // SCAN DEPTH SPECIFIC LIMITS
-    const pageLimit = options.maxPages;
-    const linkLimit = options.maxLinks;
-    const maxButtonsPerPage = options.maxButtons || 5;
-    const buttonTimeoutLimit = options.buttonTimeout || 2000;
-    const pageTimeoutLimit = options.timeoutPerPage || 8000;
+    // Enhanced limits for deep scanning
+    const pageLimit = options.maxPages || (isRenderProduction ? 100 : 200); // Increased limits
+    const linkLimit = options.maxLinks || (isRenderProduction ? 30 : 60); // Increased link testing
     
-    addLog(` ${options.scanName || 'Scan'} configuration: maxPages=${pageLimit}, maxLinks=${linkLimit}, maxButtons=${maxButtonsPerPage}, depth=${options.scanDepth}`, 'info');
+    addLog(` Deep scan configuration: maxPages=${pageLimit}, maxLinks=${linkLimit}, depth=${options.testDepth}`, 'info');
     
     // DISCOVERY FUNCTION
     async function discoverAdditionalPages(baseUrl, pagesToCrawl, visitedPages, addLog) {
@@ -1836,22 +1148,21 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
         }
       }
       
-      // Add memory and time checks with AGGRESSIVE limits for speed
+      // Add memory and time checks but be more lenient
       const memUsage = process.memoryUsage().heapUsed / 1024 / 1024;
       const scanDuration = Date.now() - new Date(scan.startTime).getTime();
       
-      if (memUsage > 800) {
+      if (memUsage > 800) { // Increased memory limit
         addLog(` Memory usage high (${Math.round(memUsage)}MB), continuing with caution`, 'warning');
+        // Continue instead of breaking - just log the warning
       }
       
-      // AGGRESSIVE TIME LIMIT - Stop after 10 minutes max
-      if (scanDuration > 10 * 60 * 1000) {
-        addLog(` 🚨 Scan time limit reached (10 minutes), stopping for performance`, 'warning');
-        break;
+      if (scanDuration > 10 * 60 * 1000) { // 10 minute time limit
+        addLog(` Scan running for ${Math.round(scanDuration/1000/60)} minutes, continuing...`, 'info');
       }
       
-      // Add a smaller delay between pages
-      await delay(200); // Reduced from 500
+      // Add a small delay between pages to prevent overwhelming the server
+      await delay(500);
       
       // Update progress more frequently
       updateProgress();

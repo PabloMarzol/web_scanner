@@ -121,30 +121,150 @@
             
             <!-- Input Form -->
             <div class="glass rounded-3xl p-8 mb-8 floating-card animate-slide-up">
-                <div class="flex flex-col md:flex-row gap-4">
-                    <div class="flex-1 relative">
-                        <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                            <i class="fas fa-globe text-gray-400"></i>
+                <div class="flex flex-col gap-6">
+                    <!-- URL Input Row -->
+                    <div class="flex flex-col md:flex-row gap-4">
+                        <div class="flex-1 relative">
+                            <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                <i class="fas fa-globe text-gray-400"></i>
+                            </div>
+                            <input 
+                                type="url" 
+                                id="websiteUrl" 
+                                placeholder="Enter website URL (e.g., https://example.com)"
+                                class="w-full pl-12 pr-4 py-4 bg-white/10 border border-white/20 rounded-2xl text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent backdrop-blur-sm transition-all duration-300"
+                                required
+                            >
                         </div>
-                        <input 
-                            type="url" 
-                            id="websiteUrl" 
-                            placeholder="Enter website URL (e.g., https://example.com)"
-                            class="w-full pl-12 pr-4 py-4 bg-white/10 border border-white/20 rounded-2xl text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent backdrop-blur-sm transition-all duration-300"
-                            required
+                        <button 
+                            id="startScan" 
+                            class="px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-2xl hover:from-blue-700 hover:to-purple-700 transition-all duration-300 font-semibold flex items-center gap-2 glow group"
                         >
+                            <i class="fas fa-rocket group-hover:animate-pulse"></i>
+                            <span id="scanButtonText">Start Deep Scan</span>
+                        </button>
                     </div>
-                    <button 
-                        id="startScan" 
-                        class="px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-2xl hover:from-blue-700 hover:to-purple-700 transition-all duration-300 font-semibold flex items-center gap-2 glow group"
-                    >
-                        <i class="fas fa-rocket group-hover:animate-pulse"></i>
-                        Start Deep Scan
-                    </button>
+                    
+                    <!-- Scan Depth Options -->
+                    <div class="bg-white/5 rounded-2xl p-6 border border-white/10">
+                        <h3 class="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                            <i class="fas fa-sliders-h text-blue-400"></i>
+                            Scan Depth & Complexity
+                        </h3>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <!-- Fast Scan -->
+                            <label class="scan-option cursor-pointer group" data-depth="fast">
+                                <input type="radio" name="scanDepth" value="fast" class="hidden">
+                                <div class="bg-gradient-to-br from-green-500/10 to-emerald-500/10 border-2 border-green-500/30 rounded-xl p-4 transition-all duration-300 group-hover:border-green-400/50 group-hover:bg-gradient-to-br group-hover:from-green-500/20 group-hover:to-emerald-500/20">
+                                    <div class="flex items-center gap-3 mb-3">
+                                        <div class="w-10 h-10 bg-green-500/20 rounded-lg flex items-center justify-center">
+                                            <i class="fas fa-bolt text-green-400 text-lg"></i>
+                                        </div>
+                                        <div>
+                                            <h4 class="font-semibold text-green-300">Fast Scan</h4>
+                                            <p class="text-xs text-green-400">~2-5 minutes</p>
+                                        </div>
+                                    </div>
+                                    <p class="text-sm text-gray-300 mb-3">Quick overview for basic issues</p>
+                                    <div class="space-y-1 text-xs text-gray-400">
+                                        <div class="flex items-center gap-2">
+                                            <i class="fas fa-check text-green-400 text-xs"></i>
+                                            <span>Up to 25 pages</span>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <i class="fas fa-check text-green-400 text-xs"></i>
+                                            <span>10 links per page</span>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <i class="fas fa-check text-green-400 text-xs"></i>
+                                            <span>1-2 buttons per page</span>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <i class="fas fa-check text-green-400 text-xs"></i>
+                                            <span>Basic SEO checks</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </label>
+                            
+                            <!-- Balanced Scan -->
+                            <label class="scan-option cursor-pointer group" data-depth="balanced">
+                                <input type="radio" name="scanDepth" value="balanced" class="hidden" checked>
+                                <div class="bg-gradient-to-br from-blue-500/10 to-purple-500/10 border-2 border-blue-500/50 rounded-xl p-4 transition-all duration-300 group-hover:border-blue-400/70 group-hover:bg-gradient-to-br group-hover:from-blue-500/20 group-hover:to-purple-500/20 ring-2 ring-blue-500/30">
+                                    <div class="flex items-center gap-3 mb-3">
+                                        <div class="w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center">
+                                            <i class="fas fa-balance-scale text-blue-400 text-lg"></i>
+                                        </div>
+                                        <div>
+                                            <h4 class="font-semibold text-blue-300">Balanced Scan</h4>
+                                            <p class="text-xs text-blue-400">~5-10 minutes</p>
+                                        </div>
+                                        <div class="ml-auto">
+                                            <span class="bg-blue-500/30 text-blue-300 text-xs px-2 py-1 rounded-full font-medium">RECOMMENDED</span>
+                                        </div>
+                                    </div>
+                                    <p class="text-sm text-gray-300 mb-3">Comprehensive analysis with optimal speed</p>
+                                    <div class="space-y-1 text-xs text-gray-400">
+                                        <div class="flex items-center gap-2">
+                                            <i class="fas fa-check text-blue-400 text-xs"></i>
+                                            <span>Up to 75 pages</span>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <i class="fas fa-check text-blue-400 text-xs"></i>
+                                            <span>25 links per page</span>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <i class="fas fa-check text-blue-400 text-xs"></i>
+                                            <span>3-5 buttons per page</span>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <i class="fas fa-check text-blue-400 text-xs"></i>
+                                            <span>Full SEO + Performance</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </label>
+                            
+                            <!-- Deep Scan -->
+                            <label class="scan-option cursor-pointer group" data-depth="deep">
+                                <input type="radio" name="scanDepth" value="deep" class="hidden">
+                                <div class="bg-gradient-to-br from-purple-500/10 to-pink-500/10 border-2 border-purple-500/30 rounded-xl p-4 transition-all duration-300 group-hover:border-purple-400/50 group-hover:bg-gradient-to-br group-hover:from-purple-500/20 group-hover:to-pink-500/20">
+                                    <div class="flex items-center gap-3 mb-3">
+                                        <div class="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center">
+                                            <i class="fas fa-microscope text-purple-400 text-lg"></i>
+                                        </div>
+                                        <div>
+                                            <h4 class="font-semibold text-purple-300">Deep Scan</h4>
+                                            <p class="text-xs text-purple-400">~10-20 minutes</p>
+                                        </div>
+                                    </div>
+                                    <p class="text-sm text-gray-300 mb-3">Thorough analysis for enterprise sites</p>
+                                    <div class="space-y-1 text-xs text-gray-400">
+                                        <div class="flex items-center gap-2">
+                                            <i class="fas fa-check text-purple-400 text-xs"></i>
+                                            <span>Up to 150 pages</span>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <i class="fas fa-check text-purple-400 text-xs"></i>
+                                            <span>50 links per page</span>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <i class="fas fa-check text-purple-400 text-xs"></i>
+                                            <span>5-10 buttons per page</span>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <i class="fas fa-check text-purple-400 text-xs"></i>
+                                            <span>Complete analysis</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
                 </div>
                 <p class="text-sm text-gray-400 mt-4 flex items-center gap-2">
                     <i class="fas fa-info-circle"></i>
-                    Scan includes: links, buttons, forms, performance, SEO, and accessibility testing
+                    <span id="scanDescription">Comprehensive analysis including: links, buttons, forms, performance, SEO, and accessibility testing</span>
                 </p>
             </div>
             
