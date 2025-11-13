@@ -4,13 +4,146 @@ import chromium from '@sparticuz/chromium';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
+import pkg from 'pg';
+import { parse as parseUrl } from 'url';
+const { Pool } = pkg;
+import dotenv from "dotenv";
+dotenv.config()
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public'));
+
+// JWT secret for authentication
+const JWT_SECRET = process.env.JWT_SECRET || 'webscan-pro-secret-key-change-in-production';
+
+// PostgreSQL connection - Parse DATABASE_URL explicitly to handle special characters in password
+let poolConfig = {
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+  max: 20, // Maximum number of clients in the pool
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 2000,
+};
+
+if (process.env.DATABASE_URL) {
+  try {
+    // Parse the DATABASE_URL to extract components explicitly
+    const url = new URL(process.env.DATABASE_URL);
+
+    poolConfig = {
+      ...poolConfig,
+      host: url.hostname,
+      port: parseInt(url.port) || 5432,
+      database: url.pathname.slice(1), // Remove leading slash
+      user: url.username,
+      password: decodeURIComponent(url.password), // Explicitly decode the password
+    };
+
+    // Disable SSL for local development databases
+    const isLocalDatabase = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname.includes('local');
+    if (isLocalDatabase) {
+      poolConfig.ssl = false;
+    }
+  } catch (error) {
+    console.error('Error parsing DATABASE_URL:', error);
+    // Fallback to connectionString if parsing fails
+    poolConfig.connectionString = process.env.DATABASE_URL;
+  }
+}
+
+const pool = new Pool(poolConfig);
+
+// Test database connection
+pool.on('connect', () => {
+  console.log('Connected to PostgreSQL database');
+});
+
+pool.on('error', (err) => {
+  console.error('Unexpected error on idle client', err);
+  process.exit(-1);
+});
+
+// Initialize database tables
+async function initializeDatabase() {
+  try {
+    // Create tables if they don't exist
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        wallet_address VARCHAR(42) UNIQUE NOT NULL,
+        subscription_tier VARCHAR(20) NOT NULL DEFAULT 'free' CHECK (subscription_tier IN ('free', 'pro')),
+        subscription_status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (subscription_status IN ('active', 'inactive', 'cancelled', 'expired')),
+        subscription_start_date TIMESTAMP WITH TIME ZONE,
+        subscription_end_date TIMESTAMP WITH TIME ZONE,
+        scans_used_this_month INTEGER NOT NULL DEFAULT 0,
+        monthly_scan_limit INTEGER NOT NULL DEFAULT 5,
+        last_scan_date DATE,
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS scans (
+        id SERIAL PRIMARY KEY,
+        scan_id VARCHAR(100) UNIQUE NOT NULL,
+        user_wallet_address VARCHAR(42) NOT NULL REFERENCES users(wallet_address) ON DELETE CASCADE,
+        target_url TEXT NOT NULL,
+        scan_depth VARCHAR(20) NOT NULL DEFAULT 'balanced',
+        pages_scanned INTEGER NOT NULL DEFAULT 0,
+        issues_found INTEGER NOT NULL DEFAULT 0,
+        scan_status VARCHAR(20) NOT NULL DEFAULT 'completed',
+        scan_duration_seconds INTEGER,
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP WITH TIME ZONE
+      );
+
+      CREATE TABLE IF NOT EXISTS payments (
+        id SERIAL PRIMARY KEY,
+        payment_id VARCHAR(100) UNIQUE NOT NULL,
+        user_wallet_address VARCHAR(42) NOT NULL REFERENCES users(wallet_address) ON DELETE CASCADE,
+        plan VARCHAR(20) NOT NULL,
+        amount DECIMAL(10,2) NOT NULL,
+        currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+        payment_status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        nowpayments_order_id VARCHAR(100),
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_users_wallet_address ON users(wallet_address);
+      CREATE INDEX IF NOT EXISTS idx_scans_user_wallet ON scans(user_wallet_address);
+      CREATE INDEX IF NOT EXISTS idx_payments_user_wallet ON payments(user_wallet_address);
+    `);
+
+    console.log('Database tables initialized successfully');
+  } catch (error) {
+    console.error('Error initializing database:', error);
+  }
+}
+
+// Initialize database on startup
+initializeDatabase();
+
+// Middleware to verify JWT tokens
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+
+  if (!token) {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) {
+      return res.status(403).json({ error: 'Invalid or expired token' });
+    }
+    req.user = user;
+    next();
+  });
+};
 
 // Store active scans
 const activeScans = new Map();
@@ -180,6 +313,131 @@ app.get('/api/scan', (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// SECTION-SPECIFIC REPORT ENDPOINTS
+app.get('/api/scan/:scanId/section/:section', (req, res) => {
+  try {
+    const { scanId, section } = req.params;
+    const scan = activeScans.get(scanId);
+    
+    if (!scan) {
+      return res.status(404).json({ error: 'Scan not found' });
+    }
+    
+    if (!scan.results) {
+      return res.status(400).json({ error: 'Scan not completed yet' });
+    }
+    
+    // Generate section-specific report
+    const sectionReport = generateSectionReport(scan, section);
+    
+    if (!sectionReport) {
+      return res.status(400).json({ error: `Invalid section: ${section}` });
+    }
+    
+    res.json(sectionReport);
+  } catch (error) {
+    console.error('GET /api/scan/:scanId/section/:section error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Helper function to generate section-specific reports
+function generateSectionReport(scan, section) {
+  const { results, sectionProgress, startTime, endTime, options } = scan;
+  const { summary, issues } = results;
+  
+  const baseMetadata = {
+    generatedAt: new Date().toISOString(),
+    scanId: scan.id,
+    url: scan.url,
+    scanType: options.scanDepth || 'balanced',
+    scanDuration: endTime ? Math.round((new Date(endTime) - new Date(startTime)) / 1000) : null,
+    sectionStatus: sectionProgress[section] || { status: 'unknown' }
+  };
+  
+  switch (section) {
+    case 'links':
+      return {
+        metadata: { ...baseMetadata, section: 'Links Analysis' },
+        summary: {
+          totalLinks: summary.totalLinks,
+          brokenLinks: summary.brokenLinksCount,
+          workingLinks: summary.totalLinks - summary.brokenLinksCount,
+          pages: summary.totalPages
+        },
+        brokenLinks: issues.brokenLinks || [],
+        workingLinks: issues.workingLinks || []
+      };
+      
+    case 'buttons':
+      return {
+        metadata: { ...baseMetadata, section: 'Interactive Elements Analysis' },
+        summary: {
+          totalButtons: summary.totalButtons,
+          brokenButtons: summary.brokenButtonsCount,
+          workingButtons: summary.totalButtons - summary.brokenButtonsCount,
+          authIssues: summary.authIssuesCount
+        },
+        brokenButtons: issues.brokenButtons || [],
+        workingButtons: issues.workingButtons || [],
+        authErrors: issues.authErrors || [],
+        enhancedResults: issues.enhancedButtonResults || []
+      };
+      
+    case 'seo':
+      return {
+        metadata: { ...baseMetadata, section: 'SEO Analysis' },
+        summary: {
+          pagesAnalyzed: issues.seoData ? issues.seoData.length : 0,
+          issuesFound: summary.seoIssuesCount || 0,
+          averageIssuesPerPage: issues.seoData ? 
+            Math.round((summary.seoIssuesCount || 0) / issues.seoData.length * 100) / 100 : 0
+        },
+        seoData: issues.seoData || [],
+        seoIssues: issues.seoIssues || []
+      };
+      
+    case 'performance':
+      return {
+        metadata: { ...baseMetadata, section: 'Performance Analysis' },
+        summary: {
+          pagesAnalyzed: issues.performanceData ? issues.performanceData.length : 0,
+          slowPages: summary.performanceIssuesCount || 0,
+          averagePageSize: summary.averagePageSize || 0,
+          averageFCP: summary.averageFCP || 0
+        },
+        performanceData: issues.performanceData || []
+      };
+      
+    case 'forms':
+      return {
+        metadata: { ...baseMetadata, section: 'Forms Analysis' },
+        summary: {
+          formsFound: summary.formsTestedCount || 0,
+          workingForms: issues.workingLinks ? issues.workingLinks.filter(l => l.type === 'form').length : 0,
+          brokenForms: issues.brokenLinks ? issues.brokenLinks.filter(l => l.type === 'form').length : 0
+        },
+        workingForms: issues.workingLinks ? issues.workingLinks.filter(l => l.type === 'form') : [],
+        brokenForms: issues.brokenLinks ? issues.brokenLinks.filter(l => l.type === 'form') : []
+      };
+      
+    case 'resources':
+      return {
+        metadata: { ...baseMetadata, section: 'Resources Analysis' },
+        summary: {
+          resourcesChecked: summary.resourcesTestedCount || 0,
+          missingResources: summary.missingResourcesCount || 0,
+          workingResources: (summary.resourcesTestedCount || 0) - (summary.missingResourcesCount || 0)
+        },
+        missingResources: issues.missingResources || [],
+        workingResources: issues.workingLinks ? issues.workingLinks.filter(l => l.type === 'resource') : []
+      };
+      
+    default:
+      return null;
+  }
+}
 
 async function scanWebsite(baseUrl, scanId, options = {}) {
   let browser;
@@ -676,6 +934,12 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
             
             if (brokenLinksOnPage > 0) {
               addLog(`Found ${brokenLinksOnPage} broken links`, 'warning');
+            }
+            
+            // Complete links section when all pages are done
+            if (processedPages >= pageLimit || pagesToCrawl.length === 0) {
+              const totalLinksChecked = allIssues.brokenLinks.length + allIssues.workingLinks.length;
+              completeSectionWithLog('links', totalLinksChecked, allIssues.brokenLinks.length);
             }
             
             // ENHANCED BUTTON TESTING - Deep Analysis System
@@ -1405,6 +1669,19 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
                 if (buttonSummary.with_state_changes > 0) {
                   addLog(` ✨ ${buttonSummary.with_state_changes} buttons caused visible state changes`, 'success');
                 }
+                
+                // Update buttons section progress
+                updateSectionProgress('buttons', 
+                  allIssues.brokenButtons.length + allIssues.workingButtons.length, 
+                  maxButtonsPerPage * Math.min(pageLimit, 10), 
+                  'running'
+                );
+                
+                // Complete buttons section when all pages are done
+                if (processedPages >= pageLimit || pagesToCrawl.length === 0) {
+                  const totalButtonsChecked = allIssues.brokenButtons.length + allIssues.workingButtons.length;
+                  completeSectionWithLog('buttons', totalButtonsChecked, allIssues.brokenButtons.length);
+                }
               } else {
                 addLog(` No buttons were tested due to complexity or limits`, 'info');
               }
@@ -1465,6 +1742,20 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
                     addLog(` No major SEO issues found`, 'success');
                   }
                   
+                  // Update SEO section progress
+                  updateSectionProgress('seo', 
+                    allIssues.seoData ? allIssues.seoData.length : 0, 
+                    Math.min(pageLimit, 20), 
+                    'running'
+                  );
+                  
+                  // Complete SEO section when all pages are done
+                  if (processedPages >= pageLimit || pagesToCrawl.length === 0) {
+                    const totalSEOPages = allIssues.seoData ? allIssues.seoData.length : 0;
+                    const totalSEOIssues = allIssues.seoIssues ? allIssues.seoIssues.length : 0;
+                    completeSectionWithLog('seo', totalSEOPages, totalSEOIssues);
+                  }
+                  
                 } catch (error) {
                   addLog(` Error checking SEO: ${error.message}`, 'error');
                 }
@@ -1512,6 +1803,22 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
                   
                   addLog(` Performance: FCP: ${Math.round(performanceMetrics.firstContentfulPaint || 0)}ms, Elements: ${performanceMetrics.totalElements}`, 'info');
                   
+                  // Update performance section progress
+                  updateSectionProgress('performance', 
+                    allIssues.performanceData ? allIssues.performanceData.length : 0, 
+                    Math.min(pageLimit, 20), 
+                    'running'
+                  );
+                  
+                  // Complete performance section when all pages are done
+                  if (processedPages >= pageLimit || pagesToCrawl.length === 0) {
+                    const totalPerfPages = allIssues.performanceData ? allIssues.performanceData.length : 0;
+                    const slowPages = allIssues.performanceData ? allIssues.performanceData.filter(p => 
+                      p.firstContentfulPaint > 3000 || p.totalElements > 1500 || p.pageSize > 2000
+                    ).length : 0;
+                    completeSectionWithLog('performance', totalPerfPages, slowPages);
+                  }
+                  
                 } catch (error) {
                   addLog(` Error collecting performance data: ${error.message}`, 'error');
                 }
@@ -1537,6 +1844,10 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
                   
                   if (forms.length > 0) {
                     addLog(` Found ${forms.length} forms to analyze`, 'info');
+                    
+                    // Update forms section progress
+                    const totalFormsFound = allIssues.workingLinks ? allIssues.workingLinks.filter(l => l.type === 'form').length : 0;
+                    updateSectionProgress('forms', totalFormsFound, 10, 'running');
                     
                     for (const form of forms.slice(0, 3)) { // Test up to 3 forms per page
                       try {
@@ -1575,6 +1886,18 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
                         addLog(` Error testing form: ${error.message}`, 'error');
                       }
                     }
+                    
+                    // Complete forms section when all pages are done
+                    if (processedPages >= pageLimit || pagesToCrawl.length === 0) {
+                      const totalFormsChecked = allIssues.workingLinks ? allIssues.workingLinks.filter(l => l.type === 'form').length : 0;
+                      const brokenFormActions = allIssues.brokenLinks ? allIssues.brokenLinks.filter(l => l.type === 'form').length : 0;
+                      completeSectionWithLog('forms', totalFormsChecked, brokenFormActions);
+                    }
+                  } else {
+                    // Complete forms section immediately if no forms found
+                    if (processedPages >= pageLimit || pagesToCrawl.length === 0) {
+                      completeSectionWithLog('forms', 0, 0);
+                    }
                   }
                 } catch (error) {
                   addLog(` Error analyzing forms: ${error.message}`, 'error');
@@ -1610,6 +1933,13 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
         }
         
         addLog(` Completed: ${fullUrl}`, 'success');
+        
+        // Complete resources section when all pages are done (placeholder for future implementation)
+        if (processedPages >= pageLimit || pagesToCrawl.length === 0) {
+          const totalResourcesChecked = allIssues.missingResources ? allIssues.missingResources.length : 0;
+          const missingResourcesCount = allIssues.missingResources ? allIssues.missingResources.length : 0;
+          completeSectionWithLog('resources', totalResourcesChecked, missingResourcesCount);
+        }
     }    
     // SCAN DEPTH SPECIFIC LIMITS
     const pageLimit = options.maxPages;
@@ -1889,9 +2219,21 @@ async function scanWebsite(baseUrl, scanId, options = {}) {
       issues: allIssues,
       pages: Array.from(visitedPages)
     };
-    
+
+    // Increment user's scan count in database
+    try {
+      await pool.query(
+        `UPDATE users SET scans_used_this_month = scans_used_this_month + 1, last_scan_date = CURRENT_DATE WHERE wallet_address = $1`,
+        [scan.user]
+      );
+      addLog(` Scan count incremented for user ${scan.user}`, 'info');
+    } catch (dbError) {
+      console.error('Error incrementing scan count:', dbError);
+      addLog(` Warning: Could not increment scan count`, 'warning');
+    }
+
     addLog(` Scan completed! Scanned ${summary.totalPages} pages, found ${summary.brokenLinksCount} broken links`, 'success');
-    
+
     const finalMemory = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
     addLog(` Final memory usage: ${finalMemory}MB`, 'info');
     
@@ -1969,6 +2311,472 @@ process.on('SIGINT', () => {
     console.log(' Server closed');
     process.exit();
   });
+});
+
+// WALLET AUTHENTICATION ENDPOINTS
+app.post('/api/auth/nonce', async (req, res) => {
+  try {
+    const { walletAddress } = req.body;
+
+    if (!walletAddress) {
+      return res.status(400).json({ error: 'Wallet address is required' });
+    }
+
+    // Generate a unique nonce
+    const nonce = crypto.randomBytes(32).toString('hex');
+
+    // Store nonce in database
+    await pool.query(
+      `INSERT INTO users (wallet_address, subscription_tier, subscription_status)
+       VALUES ($1, 'free', 'active')
+       ON CONFLICT (wallet_address) DO NOTHING`,
+      [walletAddress.toLowerCase()]
+    );
+
+    // Store nonce (we'll use a simple approach for now - in production, consider a separate nonces table)
+    const nonceKey = `nonce:${walletAddress.toLowerCase()}`;
+    await pool.query(
+      `UPDATE users SET subscription_end_date = $1 WHERE wallet_address = $2`,
+      [new Date(Date.now() + (5 * 60 * 1000)), walletAddress.toLowerCase()] // Store expiry in subscription_end_date temporarily
+    );
+
+    // For nonce storage, we'll use a simple approach - store in a JSON field or separate table
+    // For now, we'll use the database to store nonce data
+    global.nonceStore = global.nonceStore || new Map();
+    global.nonceStore.set(walletAddress.toLowerCase(), {
+      nonce,
+      timestamp: Date.now(),
+      expiresAt: Date.now() + (5 * 60 * 1000) // 5 minutes
+    });
+
+    res.json({ nonce });
+  } catch (error) {
+    console.error('Nonce generation error:', error);
+    res.status(500).json({ error: 'Failed to generate nonce' });
+  }
+});
+
+app.post('/api/auth/verify', async (req, res) => {
+  try {
+    const { walletAddress, signature, message } = req.body;
+
+    if (!walletAddress || !signature || !message) {
+      return res.status(400).json({ error: 'Wallet address, signature, and message are required' });
+    }
+
+    // Get stored nonce
+    const storedData = global.nonceStore?.get(walletAddress.toLowerCase());
+    if (!storedData) {
+      return res.status(400).json({ error: 'No nonce found for this wallet' });
+    }
+
+    // Check if nonce has expired
+    if (Date.now() > storedData.expiresAt) {
+      global.nonceStore.delete(walletAddress.toLowerCase());
+      return res.status(400).json({ error: 'Nonce has expired' });
+    }
+
+    // Verify the signature
+    const ethers = await import('ethers');
+    const messageHash = ethers.hashMessage(message);
+    const recoveredAddress = ethers.recoverAddress(messageHash, signature);
+
+    if (recoveredAddress.toLowerCase() !== walletAddress.toLowerCase()) {
+      return res.status(400).json({ error: 'Invalid signature' });
+    }
+
+    // Check if message contains the correct nonce
+    if (!message.includes(storedData.nonce)) {
+      return res.status(400).json({ error: 'Invalid message content' });
+    }
+
+    // Clear the used nonce
+    global.nonceStore.delete(walletAddress.toLowerCase());
+
+    // Get or create user in database
+    const userResult = await pool.query(
+      `SELECT * FROM users WHERE wallet_address = $1`,
+      [walletAddress.toLowerCase()]
+    );
+
+    let user;
+    if (userResult.rows.length === 0) {
+      // Create new user
+      const newUserResult = await pool.query(
+        `INSERT INTO users (wallet_address, subscription_tier, subscription_status, monthly_scan_limit)
+         VALUES ($1, 'free', 'active', 5)
+         RETURNING *`,
+        [walletAddress.toLowerCase()]
+      );
+      user = newUserResult.rows[0];
+    } else {
+      user = userResult.rows[0];
+    }
+
+    // Generate JWT token
+    const token = jwt.sign(
+      {
+        walletAddress: walletAddress.toLowerCase(),
+        subscriptionTier: user.subscription_tier,
+        authenticatedAt: new Date().toISOString()
+      },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.json({
+      token,
+      user: {
+        walletAddress: walletAddress.toLowerCase(),
+        subscriptionTier: user.subscription_tier,
+        subscriptionStatus: user.subscription_status,
+        scansUsedThisMonth: user.scans_used_this_month,
+        monthlyScanLimit: user.monthly_scan_limit,
+        authenticatedAt: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    console.error('Signature verification error:', error);
+    res.status(500).json({ error: 'Failed to verify signature' });
+  }
+});
+
+// PAYMENT ENDPOINTS (NOWPayments)
+app.post('/api/create-payment', authenticateToken, async (req, res) => {
+  try {
+    const { plan, amount, currency, walletAddress } = req.body;
+    const user = req.user;
+
+    if (!plan || !amount || !currency) {
+      return res.status(400).json({ error: 'Plan, amount, and currency are required' });
+    }
+
+    // Validate user owns the wallet
+    if (user.walletAddress !== walletAddress.toLowerCase()) {
+      return res.status(403).json({ error: 'Wallet address mismatch' });
+    }
+
+    // NOWPayments API configuration
+    const NOWPAYMENTS_API_URL = 'https://api.nowpayments.io/v1';
+    const NOWPAYMENTS_API_KEY = process.env.NOWPAYMENTS_SECRET_KEY;
+
+    if (!NOWPAYMENTS_API_KEY) {
+      return res.status(500).json({ error: 'Payment service not configured' });
+    }
+
+    // Create payment invoice
+    const paymentData = {
+      price_amount: amount,
+      price_currency: currency,
+      pay_currency: 'BTC', // Changed from USDT to BTC (more widely supported)
+      order_id: `webscan-${user.walletAddress}-${Date.now()}`,
+      order_description: `WebScan Pro ${plan} subscription`,
+      success_url: `${req.protocol}://${req.get('host')}/app?payment=success`,
+      cancel_url: `${req.protocol}://${req.get('host')}/?payment=cancelled`,
+      ipn_callback_url: `${req.protocol}://${req.get('host')}/api/nowpayments-webhook`
+    };
+
+    const response = await fetch(`${NOWPAYMENTS_API_URL}/invoice`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': NOWPAYMENTS_API_KEY
+      },
+      body: JSON.stringify(paymentData)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.text();
+      console.error('NOWPayments API error:', errorData);
+      return res.status(500).json({ error: 'Failed to create payment invoice' });
+    }
+
+    const paymentResult = await response.json();
+
+    res.json({
+      paymentId: paymentResult.id,
+      paymentUrl: paymentResult.invoice_url,
+      payAddress: paymentResult.pay_address,
+      payAmount: paymentResult.pay_amount,
+      payCurrency: paymentResult.pay_currency
+    });
+  } catch (error) {
+    console.error('Payment creation error:', error);
+    res.status(500).json({ error: 'Failed to create payment' });
+  }
+});
+
+// NOWPayments webhook endpoint
+app.post('/api/nowpayments-webhook', async (req, res) => {
+  try {
+    const webhookData = req.body;
+
+    // Verify webhook signature using IPN secret
+    const NOWPAYMENTS_IPN_SECRET = process.env.NOWPAYMENTS_IPN_KEY;
+    if (NOWPAYMENTS_IPN_SECRET) {
+      const expectedSignature = crypto
+        .createHmac('sha512', NOWPAYMENTS_IPN_SECRET)
+        .update(JSON.stringify(webhookData))
+        .digest('hex');
+
+      const receivedSignature = req.headers['x-nowpayments-sig'];
+
+      if (receivedSignature !== expectedSignature) {
+        return res.status(400).json({ error: 'Invalid webhook signature' });
+      }
+    }
+
+    // Process payment status update
+    if (webhookData.payment_status === 'finished' || webhookData.payment_status === 'confirmed') {
+      const orderId = webhookData.order_id;
+      const walletAddress = orderId.split('-')[1]; // Extract wallet address from order_id
+      const plan = orderId.split('-')[2]; // Extract plan from order_id
+
+      console.log(`Payment confirmed for wallet: ${walletAddress}, plan: ${plan}`);
+
+      // Update user subscription in PostgreSQL database
+      try {
+        const subscriptionDetails = {
+          pro: {
+            tier: 'pro',
+            limit: 1000, // Unlimited scans (represented as high number)
+            endDate: new Date(Date.now() + (30 * 24 * 60 * 60 * 1000)) // 30 days from now
+          }
+        };
+
+        const planDetails = subscriptionDetails[plan];
+        if (planDetails) {
+          await pool.query(
+            `UPDATE users
+             SET subscription_tier = $1,
+                 subscription_status = 'active',
+                 subscription_start_date = CURRENT_TIMESTAMP,
+                 subscription_end_date = $2,
+                 monthly_scan_limit = $3,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE wallet_address = $4`,
+            [planDetails.tier, planDetails.endDate, planDetails.limit, walletAddress.toLowerCase()]
+          );
+
+          console.log(`Updated subscription for ${walletAddress} to ${plan} tier`);
+        }
+
+        // Record the payment
+        await pool.query(
+          `INSERT INTO payments (payment_id, user_wallet_address, plan, amount, currency, payment_status, nowpayments_order_id)
+           VALUES ($1, $2, $3, $4, $5, 'completed', $6)
+           ON CONFLICT (payment_id) DO UPDATE SET
+             payment_status = 'completed',
+             updated_at = CURRENT_TIMESTAMP`,
+          [webhookData.payment_id, walletAddress.toLowerCase(), plan, webhookData.pay_amount, webhookData.pay_currency, orderId]
+        );
+
+      } catch (dbError) {
+        console.error('Database update error:', dbError);
+        // Don't fail the webhook, just log the error
+      }
+    }
+
+    res.json({ received: true });
+  } catch (error) {
+    console.error('Webhook processing error:', error);
+    res.status(500).json({ error: 'Webhook processing failed' });
+  }
+});
+
+// TOKEN VERIFICATION ENDPOINT
+app.post('/api/auth/verify-token', authenticateToken, (req, res) => {
+  // If middleware passes, token is valid
+  res.json({
+    valid: true,
+    user: {
+      walletAddress: req.user.walletAddress,
+      subscriptionTier: req.user.subscriptionTier,
+      authenticatedAt: req.user.authenticatedAt
+    }
+  });
+});
+
+// ROUTING FOR LANDING PAGE AND APP
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'landing.html'));
+});
+
+app.get('/app', (req, res) => {
+  // Serve the app - authentication is handled client-side
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Static files middleware (must come after routes to avoid conflicts)
+app.use(express.static('public'));
+
+// Protect scan endpoint with authentication
+app.post('/api/scan', authenticateToken, async (req, res) => {
+  try {
+    const user = req.user;
+
+    // Get user's current subscription and scan count from database
+    const userResult = await pool.query(
+      `SELECT subscription_tier, subscription_status, scans_used_this_month, monthly_scan_limit, subscription_end_date
+       FROM users WHERE wallet_address = $1`,
+      [user.walletAddress]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(403).json({ error: 'User not found' });
+    }
+
+    const userData = userResult.rows[0];
+
+    // Check if subscription is active
+    if (userData.subscription_status !== 'active') {
+      return res.status(403).json({
+        error: 'Subscription is not active',
+        subscriptionStatus: userData.subscription_status
+      });
+    }
+
+    // Check if subscription has expired
+    if (userData.subscription_end_date && new Date(userData.subscription_end_date) < new Date()) {
+      // Update status to expired
+      await pool.query(
+        `UPDATE users SET subscription_status = 'expired' WHERE wallet_address = $1`,
+        [user.walletAddress]
+      );
+      return res.status(403).json({ error: 'Subscription has expired' });
+    }
+
+    // Check scan limits
+    if (userData.scans_used_this_month >= userData.monthly_scan_limit) {
+      return res.status(429).json({
+        error: 'Monthly scan limit reached',
+        scansUsed: userData.scans_used_this_month,
+        monthlyLimit: userData.monthly_scan_limit,
+        subscriptionTier: userData.subscription_tier
+      });
+    }
+
+    const { url, scanId, options = {} } = req.body;
+
+    if (!url) {
+      return res.status(400).json({ error: 'URL is required' });
+    }
+
+    // Validate URL
+    try {
+      new URL(url);
+    } catch {
+      return res.status(400).json({ error: 'Invalid URL format' });
+    }
+
+    // Apply subscription-based limits
+    const tierLimits = {
+      free: { maxPages: 25, maxLinks: 10, maxButtons: 2, scanDepth: 'fast' },
+      pro: { maxPages: 150, maxLinks: 50, maxButtons: 10, scanDepth: 'deep' }
+    };
+
+    const limits = tierLimits[userData.subscription_tier] || tierLimits.free;
+
+    // Enhanced scan configuration with depth-specific defaults
+    const isProduction = process.env.NODE_ENV === 'production';
+    const scanDepth = options.scanDepth || limits.scanDepth;
+
+    // Apply scan depth configurations with user limits
+    let depthConfig = {};
+    switch (scanDepth) {
+      case 'fast':
+        depthConfig = {
+          maxPages: Math.min(options.maxPages || limits.maxPages, limits.maxPages),
+          maxLinks: Math.min(options.maxLinks || limits.maxLinks, limits.maxLinks),
+          maxButtons: Math.min(options.maxButtons || limits.maxButtons, limits.maxButtons),
+          includeButtons: options.includeButtons !== false,
+          includeForms: options.includeForms !== undefined ? options.includeForms : false,
+          includeResources: options.includeResources !== undefined ? options.includeResources : false,
+          includePerformance: options.includePerformance !== undefined ? options.includePerformance : false,
+          includeSEO: options.includeSEO !== false,
+          timeoutPerPage: options.timeoutPerPage || 5000,
+          buttonTimeout: options.buttonTimeout || 1000
+        };
+        break;
+      case 'balanced':
+        depthConfig = {
+          maxPages: Math.min(options.maxPages || 75, limits.maxPages),
+          maxLinks: Math.min(options.maxLinks || 25, limits.maxLinks),
+          maxButtons: Math.min(options.maxButtons || 5, limits.maxButtons),
+          includeButtons: options.includeButtons !== false,
+          includeForms: options.includeForms !== false,
+          includeResources: options.includeResources !== false,
+          includePerformance: options.includePerformance !== false,
+          includeSEO: options.includeSEO !== false,
+          timeoutPerPage: options.timeoutPerPage || 8000,
+          buttonTimeout: options.buttonTimeout || 2000
+        };
+        break;
+      case 'deep':
+        depthConfig = {
+          maxPages: Math.min(options.maxPages || 150, limits.maxPages),
+          maxLinks: Math.min(options.maxLinks || 50, limits.maxLinks),
+          maxButtons: Math.min(options.maxButtons || 10, limits.maxButtons),
+          includeButtons: options.includeButtons !== false,
+          includeForms: options.includeForms !== false,
+          includeResources: options.includeResources !== false,
+          includePerformance: options.includePerformance !== false,
+          includeSEO: options.includeSEO !== false,
+          timeoutPerPage: options.timeoutPerPage || 12000,
+          buttonTimeout: options.buttonTimeout || 3000
+        };
+        break;
+    }
+
+    const scanOptions = {
+      ...depthConfig,
+      useSitemap: options.useSitemap !== false,
+      timeout: options.timeout || 30000,
+      comprehensive: options.comprehensive !== false,
+      testDepth: scanDepth,
+      scanDepth: scanDepth,
+      scanName: options.scanName || `${scanDepth.charAt(0).toUpperCase() + scanDepth.slice(1)} Scan`
+    };
+
+    const scan = {
+      id: scanId,
+      status: 'running',
+      progress: 0,
+      url,
+      options: scanOptions,
+      startTime: new Date(),
+      results: null,
+      user: user.walletAddress, // Track which user initiated the scan
+      // Enhanced section-specific tracking
+      sectionProgress: {
+        links: { status: 'pending', progress: 0, completed: false, total: 0, tested: 0 },
+        buttons: { status: 'pending', progress: 0, completed: false, total: 0, tested: 0 },
+        seo: { status: 'pending', progress: 0, completed: false, total: 0, tested: 0 },
+        performance: { status: 'pending', progress: 0, completed: false, total: 0, tested: 0 },
+        forms: { status: 'pending', progress: 0, completed: false, total: 0, tested: 0 },
+        resources: { status: 'pending', progress: 0, completed: false, total: 0, tested: 0 }
+      },
+      logs: []
+    };
+
+    activeScans.set(scanId, scan);
+
+    // Start scanning in background with better error handling
+    scanWebsite(url, scanId, scanOptions).catch(error => {
+      console.error(`Background scan error for ${scanId}:`, error);
+      const failedScan = activeScans.get(scanId);
+      if (failedScan) {
+        failedScan.status = 'error';
+        failedScan.error = error.message;
+        failedScan.progress = 0;
+      }
+    });
+
+    res.json({ scanId, status: 'started', options: scanOptions });
+  } catch (error) {
+    console.error('POST /api/scan error:', error);
+    res.status(500).json({ error: 'Internal server error', message: error.message });
+  }
 });
 
 // Clean up old scans every 10 minutes to prevent memory leaks

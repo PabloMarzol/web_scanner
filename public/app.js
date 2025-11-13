@@ -4,10 +4,226 @@ class WebsiteTester {
         this.pollInterval = null;
         this.currentResults = null;
         this.displayedLogs = new Set();
+        this.user = null;
+        this.checkAuthentication();
+        this.checkPaymentStatus();
         this.initEventListeners();
         this.addEntranceAnimations();
         this.initTabs();
         this.initScanDepthSelector();
+    }
+
+    async checkAuthentication() {
+        try {
+            // Check if we have a token in localStorage
+            const token = localStorage.getItem('webscan_token');
+            if (!token) {
+                this.redirectToLanding();
+                return;
+            }
+
+            // Verify token with server
+            const response = await fetch('/api/auth/verify-token', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+
+            if (!response.ok) {
+                // Token is invalid, redirect to landing
+                localStorage.removeItem('webscan_token');
+                this.redirectToLanding();
+                return;
+            }
+
+            const data = await response.json();
+            this.user = data.user;
+            this.updateUserInterface();
+
+        } catch (error) {
+            console.error('Authentication check failed:', error);
+            this.redirectToLanding();
+        }
+    }
+
+    redirectToLanding() {
+        window.location.href = '/';
+    }
+
+    disconnectWallet() {
+        // Remove token from localStorage
+        localStorage.removeItem('webscan_token');
+
+        // Clear user data
+        this.user = null;
+
+        // Show notification
+        this.showNotification('Wallet disconnected successfully', 'info');
+
+        // Immediately redirect to landing page (remove delay)
+        this.redirectToLanding();
+    }
+
+    checkPaymentStatus() {
+        const urlParams = new URLSearchParams(window.location.search);
+
+        if (urlParams.get('payment') === 'success') {
+            // Clear the URL parameter
+            const newUrl = window.location.pathname;
+            window.history.replaceState({}, document.title, newUrl);
+
+            // Show success message
+            setTimeout(() => {
+                this.showNotification('🎉 Payment successful! Welcome to WebScan Pro!', 'success');
+            }, 1000);
+
+            // Refresh user data to get updated subscription
+            setTimeout(() => {
+                this.checkAuthentication();
+            }, 2000);
+
+        } else if (urlParams.get('payment') === 'cancelled') {
+            // Clear the URL parameter
+            const newUrl = window.location.pathname;
+            window.history.replaceState({}, document.title, newUrl);
+
+            // Show cancellation message
+            setTimeout(() => {
+                this.showNotification('Payment was cancelled. You can try again anytime.', 'info');
+            }, 1000);
+
+            // Refresh user data to ensure correct subscription status
+            setTimeout(() => {
+                this.checkAuthentication();
+            }, 1000);
+        }
+    }
+
+    updateUserInterface() {
+        if (!this.user) return;
+
+        try {
+            // Update user info display
+            const userInfo = document.getElementById('userInfo');
+            if (userInfo) {
+                userInfo.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full flex items-center justify-center">
+                            <i class="fas fa-user text-white text-sm"></i>
+                        </div>
+                        <div>
+                            <p class="text-sm font-medium text-white">${this.user.subscriptionTier.charAt(0).toUpperCase() + this.user.subscriptionTier.slice(1)} Plan</p>
+                            <p class="text-xs text-gray-400">${this.user.scansUsedThisMonth}/${this.user.monthlyScanLimit} scans used</p>
+                        </div>
+                        <button id="disconnectWalletBtn" class="ml-2 px-3 py-1 bg-red-500/20 hover:bg-red-500/30 text-red-300 rounded-lg transition-colors text-xs" title="Disconnect Wallet">
+                            <i class="fas fa-sign-out-alt"></i>
+                        </button>
+                    </div>
+                `;
+
+                // Add disconnect button event listener
+                const disconnectBtn = document.getElementById('disconnectWalletBtn');
+                if (disconnectBtn) {
+                    disconnectBtn.addEventListener('click', () => this.disconnectWallet());
+                }
+            }
+
+            // Update scan limits display
+            const scanLimits = document.getElementById('scanLimits');
+            if (scanLimits) {
+                const remaining = this.user.monthlyScanLimit - this.user.scansUsedThisMonth;
+                scanLimits.innerHTML = `
+                    <div class="text-center">
+                        <p class="text-2xl font-bold text-white">${remaining}</p>
+                        <p class="text-sm text-gray-400">scans remaining</p>
+                        <div class="w-full bg-gray-700 rounded-full h-2 mt-2">
+                            <div class="bg-gradient-to-r from-blue-500 to-purple-500 h-2 rounded-full"
+                                 style="width: ${(this.user.scansUsedThisMonth / this.user.monthlyScanLimit) * 100}%"></div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Disable scan options based on subscription
+            this.updateScanOptions();
+        } catch (error) {
+            console.error('Error updating user interface:', error);
+            // Continue without breaking the page
+        }
+    }
+
+    updateScanOptions() {
+        if (!this.user) return;
+
+        const scanOptions = document.querySelectorAll('.scan-option');
+        const subscriptionTier = this.user.subscriptionTier;
+
+        scanOptions.forEach(option => {
+            const depth = option.getAttribute('data-depth');
+            const isDisabled = this.isScanDepthDisabled(depth, subscriptionTier);
+
+            if (isDisabled) {
+                option.classList.add('disabled');
+                option.setAttribute('disabled', 'true');
+
+                // Add upgrade prompt
+                const card = option.querySelector('div');
+                if (card && !card.querySelector('.upgrade-prompt')) {
+                    const prompt = document.createElement('div');
+                    prompt.className = 'upgrade-prompt';
+                    prompt.innerHTML = `
+                        <div class="upgrade-content">
+                            <i class="fas fa-lock"></i>
+                            <p>Upgrade Required</p>
+                            <p>Available in Pro plan</p>
+                        </div>
+                    `;
+                    card.style.position = 'relative';
+                    card.appendChild(prompt);
+                }
+            } else {
+                option.classList.remove('disabled');
+                option.removeAttribute('disabled');
+
+                // Remove upgrade prompt
+                const prompt = option.querySelector('.upgrade-prompt');
+                if (prompt) {
+                    prompt.remove();
+                }
+            }
+        });
+
+        // Auto-select appropriate scan depth
+        const availableDepths = ['fast', 'balanced', 'deep'].filter(depth =>
+            !this.isScanDepthDisabled(depth, subscriptionTier)
+        );
+
+        if (availableDepths.length > 0) {
+            const defaultDepth = availableDepths[availableDepths.length - 1]; // Select the most advanced available
+            this.updateScanOptionStyles(defaultDepth);
+            this.updateScanUI(defaultDepth);
+
+            // Update radio button
+            document.querySelectorAll('input[name="scanDepth"]').forEach(radio => {
+                radio.checked = radio.value === defaultDepth;
+            });
+        }
+    }
+
+    isScanDepthDisabled(depth, tier) {
+        // Treat 'trial' as 'free' for scan restrictions
+        const effectiveTier = tier === 'trial' ? 'free' : tier;
+        
+        const restrictions = {
+            free: ['balanced', 'deep'], // Free users can't use balanced or deep scans
+            pro: [], // Pro users can use all depths
+            enterprise: [], // Enterprise users can use all depths
+            trial: ['balanced', 'deep'] // Trial users can't use balanced or deep scans
+        };
+
+        return restrictions[effectiveTier]?.includes(depth) || false;
     }
     
     addEntranceAnimations() {
@@ -94,6 +310,12 @@ class WebsiteTester {
         scanOptions.forEach(option => {
             option.addEventListener('click', () => {
                 const depth = option.getAttribute('data-depth');
+                
+                // Check if the option is disabled
+                if (option.hasAttribute('disabled')) {
+                    this.showNotification('This scan option requires a Pro subscription', 'info');
+                    return;
+                }
                 
                 // Update radio button selection
                 document.querySelectorAll('input[name="scanDepth"]').forEach(radio => {
@@ -194,11 +416,22 @@ class WebsiteTester {
     
     initEventListeners() {
         document.getElementById('startScan').addEventListener('click', () => this.startScan());
+        document.getElementById('stopScan').addEventListener('click', () => this.stopScan());
+        document.getElementById('resumeScan').addEventListener('click', () => this.resumeScan());
         document.getElementById('websiteUrl').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') this.startScan();
         });
         document.getElementById('downloadReport').addEventListener('click', () => this.downloadReport());
         document.getElementById('downloadCSV').addEventListener('click', () => this.downloadCSV());
+        
+        // Section-specific download buttons
+        const sectionButtons = document.querySelectorAll('.section-download-btn');
+        sectionButtons.forEach(button => {
+            button.addEventListener('click', (e) => {
+                const section = e.currentTarget.getAttribute('data-section');
+                this.downloadSectionReport(section);
+            });
+        });
         
         // Add input animation
         const urlInput = document.getElementById('websiteUrl');
@@ -207,6 +440,50 @@ class WebsiteTester {
         });
         urlInput.addEventListener('blur', () => {
             urlInput.parentElement.classList.remove('glow');
+        });
+    }
+    
+    resetSectionProgress() {
+        // Reset all progress indicators
+        const sections = ['links', 'buttons', 'seo', 'performance', 'forms', 'resources'];
+        
+        sections.forEach(section => {
+            // Reset progress indicators
+            const progressElement = document.getElementById(`${section}Progress`);
+            if (progressElement) {
+                progressElement.textContent = '--';
+                progressElement.classList.remove('text-green-400', 'text-blue-400');
+            }
+            
+            // Reset download buttons
+            const downloadButton = document.querySelector(`[data-section="${section}"]`);
+            if (downloadButton) {
+                downloadButton.disabled = true;
+                downloadButton.classList.remove('completed');
+                
+                // Reset button text
+                const title = downloadButton.querySelector('.section-title');
+                if (title) {
+                    title.textContent = section.charAt(0).toUpperCase() + section.slice(1);
+                }
+                
+                // Hide spinner and badge
+                const spinner = downloadButton.querySelector('.loading-spinner');
+                if (spinner) {
+                    spinner.classList.add('hidden');
+                }
+                
+                const badge = downloadButton.querySelector('.completion-badge');
+                if (badge) {
+                    badge.classList.add('hidden');
+                }
+                
+                // Reset icon wrapper
+                const iconWrapper = downloadButton.querySelector('.icon-wrapper');
+                if (iconWrapper) {
+                    iconWrapper.style.opacity = '1';
+                }
+            }
         });
     }
     
@@ -241,8 +518,9 @@ class WebsiteTester {
         this.showLoadingOverlay();
         this.currentScanId = 'scan_' + Date.now();
         
-        // Reset displayed logs for new scan
+        // Reset displayed logs and section progress for new scan
         this.displayedLogs = new Set();
+        this.resetSectionProgress();
         
         try {
             console.log('Starting scan for:', url);
@@ -282,6 +560,10 @@ class WebsiteTester {
             document.getElementById('progressSection').classList.remove('hidden');
             document.getElementById('resultsSection').classList.add('hidden');
             
+            // Show stop button and hide resume button
+            document.getElementById('stopScan').classList.remove('hidden');
+            document.getElementById('resumeScan').classList.add('hidden');
+            
             // Start polling for results
             this.pollForResults();
             
@@ -289,6 +571,96 @@ class WebsiteTester {
             console.error('Full error details:', error);
             this.hideLoadingOverlay();
             this.showNotification('Error starting scan: ' + error.message, 'error');
+        }
+    }
+
+    async stopScan() {
+        if (!this.currentScanId) {
+            this.showNotification('No active scan to stop', 'error');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/scan/stop', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ scanId: this.currentScanId })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to stop scan');
+            }
+
+            const result = await response.json();
+            this.showNotification('Scan stopped successfully. Partial report available.', 'info');
+
+            // Clear the polling interval
+            if (this.pollInterval) {
+                clearInterval(this.pollInterval);
+                this.pollInterval = null;
+            }
+
+            // Show resume button and hide stop button
+            document.getElementById('stopScan').classList.add('hidden');
+            document.getElementById('resumeScan').classList.remove('hidden');
+
+            // Update UI to show stopped state
+            document.getElementById('progressStatus').innerHTML = 
+                `<i class="fas fa-pause text-yellow-400"></i> Scan stopped by user. Partial results available.`;
+
+            // Get the current scan state to display partial results
+            const scanResponse = await fetch(`/api/scan?scanId=${this.currentScanId}`);
+            const scanData = await scanResponse.json();
+
+            if (scanData.results) {
+                document.getElementById('progressSection').classList.add('hidden');
+                this.displayResults(scanData.results);
+            }
+
+        } catch (error) {
+            this.showNotification('Error stopping scan: ' + error.message, 'error');
+        }
+    }
+
+    async resumeScan() {
+        if (!this.currentScanId) {
+            this.showNotification('No scan to resume', 'error');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/scan/resume', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ scanId: this.currentScanId })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to resume scan');
+            }
+
+            const result = await response.json();
+            this.showNotification('Scan resumed successfully', 'success');
+
+            // Show stop button and hide resume button
+            document.getElementById('stopScan').classList.remove('hidden');
+            document.getElementById('resumeScan').classList.add('hidden');
+
+            // Hide results section and show progress
+            document.getElementById('resultsSection').classList.add('hidden');
+            document.getElementById('progressSection').classList.remove('hidden');
+
+            // Start polling for results again
+            this.pollForResults();
+
+        } catch (error) {
+            this.showNotification('Error resuming scan: ' + error.message, 'error');
         }
     }
     
@@ -341,6 +713,9 @@ class WebsiteTester {
                 // Update real-time logs
                 this.updateLogs(scan.logs || []);
                 
+                // Update section progress
+                this.updateSectionProgress(scan.sectionProgress || {});
+                
                 if (scan.status === 'running') {
                     const selectedDepth = this.getSelectedScanDepth();
                     const config = this.scanConfigs[selectedDepth];
@@ -365,6 +740,111 @@ class WebsiteTester {
                 document.getElementById('progressSection').classList.add('hidden');
             }
         }, 2000);
+    }
+    
+    updateSectionProgress(sectionProgress) {
+        // Update progress indicators in tab buttons
+        let completedCount = 0;
+        const totalSections = 6;
+        
+        Object.keys(sectionProgress).forEach(section => {
+            const progress = sectionProgress[section];
+            const progressElement = document.getElementById(`${section}Progress`);
+            
+            if (progress.completed) {
+                completedCount++;
+            }
+            
+            if (progressElement) {
+                if (progress.completed) {
+                    progressElement.textContent = '✅';
+                    progressElement.classList.add('text-green-400');
+                } else if (progress.status === 'running') {
+                    progressElement.textContent = `${progress.progress}%`;
+                    progressElement.classList.add('text-blue-400');
+                } else {
+                    progressElement.textContent = '--';
+                }
+            }
+            
+            // Enable download button when section is completed
+            const downloadButton = document.querySelector(`[data-section="${section}"]`);
+            if (downloadButton && progress.completed) {
+                downloadButton.disabled = false;
+                downloadButton.classList.add('completed');
+                
+                // Show completion badge
+                const badge = downloadButton.querySelector('.completion-badge');
+                if (badge) {
+                    badge.classList.remove('hidden');
+                }
+                
+                // Add completion animation
+                setTimeout(() => {
+                    downloadButton.classList.remove('completed');
+                }, 2000);
+            }
+        });
+        
+        // Update completion counter
+        const completedSectionsElement = document.getElementById('completedSections');
+        if (completedSectionsElement) {
+            completedSectionsElement.textContent = `${completedCount}/${totalSections} Ready`;
+            
+            if (completedCount === totalSections) {
+                completedSectionsElement.classList.add('text-green-300');
+                completedSectionsElement.classList.remove('text-green-400');
+            }
+        }
+    }
+    
+    async downloadSectionReport(section) {
+        if (!this.currentScanId) {
+            this.showNotification('No scan data available', 'error');
+            return;
+        }
+        
+        const button = document.querySelector(`[data-section="${section}"]`);
+        const spinner = button.querySelector('.loading-spinner');
+        const title = button.querySelector('.section-title');
+        const iconWrapper = button.querySelector('.icon-wrapper');
+        
+        try {
+            // Show loading state
+            spinner.classList.remove('hidden');
+            title.textContent = 'Loading...';
+            iconWrapper.style.opacity = '0.5';
+            button.disabled = true;
+            
+            const response = await fetch(`/api/scan/${this.currentScanId}/section/${section}`);
+            
+            if (!response.ok) {
+                throw new Error(`Failed to fetch ${section} report: ${response.statusText}`);
+            }
+            
+            const sectionData = await response.json();
+            
+            // Create and download the report
+            const dataStr = JSON.stringify(sectionData, null, 2);
+            const dataBlob = new Blob([dataStr], { type: 'application/json' });
+            
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(dataBlob);
+            link.download = `${section}-report-${new Date().toISOString().split('T')[0]}.json`;
+            link.click();
+            
+            this.showNotification(`${section.charAt(0).toUpperCase() + section.slice(1)} report downloaded!`, 'success');
+            
+        } catch (error) {
+            console.error(`Error downloading ${section} report:`, error);
+            this.showNotification(`Error downloading ${section} report: ${error.message}`, 'error');
+        } finally {
+            // Reset button state
+            spinner.classList.add('hidden');
+            title.textContent = section.charAt(0).toUpperCase() + section.slice(1);
+            iconWrapper.style.opacity = '1';
+            button.disabled = false;
+        }
     }
     
     updateLogs(logs) {

@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebScan Pro - Website Analysis Tool</title>
+    <script src="https://cdn.tailwindcss.com/3.4.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    animation: {
+                        'gradient': 'gradient 15s ease infinite',
+                        'float': 'float 3s ease-in-out infinite',
+                        'pulse-slow': 'pulse 3s linear infinite',
+                        'slide-up': 'slideUp 0.5s ease-out',
+                        'fade-in': 'fadeIn 0.6s ease-out'
+                    },
+                    keyframes: {
+                        gradient: {
+                            '0%, 100%': {
+                                'background-size': '200% 200%',
+                                'background-position': 'left center'
+                            },
+                            '50%': {
+                                'background-size': '200% 200%',
+                                'background-position': 'right center'
+                            }
+                        },
+                        float: {
+                            '0%, 100%': { transform: 'translateY(0px)' },
+                            '50%': { transform: 'translateY(-10px)' }
+                        },
+                        slideUp: {
+                            '0%': { transform: 'translateY(100px)', opacity: '0' },
+                            '100%': { transform: 'translateY(0)', opacity: '1' }
+                        },
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .glass {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .glass-dark {
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .gradient-text {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .floating-card {
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            transition: all 0.3s ease;
+        }
+        .floating-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+        }
+        .glow {
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+        }
+        .glow:hover {
+            box-shadow: 0 0 30px rgba(59, 130, 246, 0.5);
+        }
+        .pricing-card {
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.1) 100%);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: all 0.3s ease;
+        }
+        .pricing-card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+        }
+        .pricing-card.popular {
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, rgba(16, 185, 129, 0.2) 100%);
+            border-color: rgba(34, 197, 94, 0.4);
+            box-shadow: 0 0 30px rgba(34, 197, 94, 0.2);
+        }
+        .pricing-card.popular:hover {
+            box-shadow: 0 0 40px rgba(34, 197, 94, 0.3);
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 animate-gradient">
+    <!-- Animated Background -->
+    <div class="fixed inset-0 overflow-hidden pointer-events-none">
+        <div class="absolute -top-4 -left-4 w-72 h-72 bg-purple-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-float"></div>
+        <div class="absolute -top-4 -right-4 w-72 h-72 bg-blue-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-float" style="animation-delay: -1s;"></div>
+        <div class="absolute -bottom-8 left-20 w-72 h-72 bg-pink-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-float" style="animation-delay: -2s;"></div>
+    </div>
+
+    <div class="relative z-10">
+        <!-- Navigation -->
+        <nav class="glass sticky top-0 z-50 backdrop-blur-md">
+            <div class="container mx-auto px-4 py-4">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-2">
+                        <div class="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl flex items-center justify-center">
+                            <i class="fas fa-search text-white text-lg"></i>
+                        </div>
+                        <span class="text-xl font-bold gradient-text">WebScan Pro</span>
+                    </div>
+                    <div class="hidden md:flex items-center space-x-6">
+                        <a href="#features" class="text-gray-300 hover:text-white transition-colors">Features</a>
+                        <a href="#pricing" class="text-gray-300 hover:text-white transition-colors">Pricing</a>
+                        <a href="#how-it-works" class="text-gray-300 hover:text-white transition-colors">How It Works</a>
+                        <button id="connectWallet" class="px-6 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-300 font-semibold">
+                            <i class="fas fa-wallet mr-2"></i>Connect Wallet
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Hero Section -->
+        <section class="container mx-auto px-4 py-20 text-center">
+            <div class="max-w-4xl mx-auto animate-fade-in">
+                <div class="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-r from-blue-500 to-purple-600 rounded-3xl mb-8 animate-float">
+                    <i class="fas fa-search text-3xl text-white"></i>
+                </div>
+                <h1 class="text-6xl font-bold mb-6 gradient-text">
+                    Professional Website Analysis
+                </h1>
+                <p class="text-xl text-gray-300 max-w-3xl mx-auto mb-8">
+                    Scan websites for broken links, buttons, performance issues, SEO problems, and accessibility concerns with real-time analytics. Powered by blockchain technology.
+                </p>
+                <div class="flex flex-col sm:flex-row gap-4 justify-center items-center">
+                    <button id="getStartedHeroBtn" class="px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-2xl hover:from-blue-700 hover:to-purple-700 transition-all duration-300 font-semibold text-lg glow group">
+                        <i class="fas fa-rocket group-hover:animate-pulse mr-2"></i>Get Started Free
+                    </button>
+                    <button id="viewPricingBtn" class="px-8 py-4 glass text-white rounded-2xl hover:bg-white/20 transition-all duration-300 font-semibold text-lg">
+                        <i class="fas fa-tags mr-2"></i>View Pricing
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Features Section -->
+        <section id="features" class="container mx-auto px-4 py-20">
+            <div class="text-center mb-16">
+                <h2 class="text-4xl font-bold mb-4 gradient-text">Powerful Features</h2>
+                <p class="text-xl text-gray-300 max-w-2xl mx-auto">
+                    Comprehensive website analysis tools designed for developers, marketers, and businesses.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                <!-- Feature 1 -->
+                <div class="glass rounded-3xl p-8 floating-card animate-slide-up">
+                    <div class="w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mb-6">
+                        <i class="fas fa-link text-2xl text-white"></i>
+                    </div>
+                    <h3 class="text-2xl font-bold text-white mb-4">Link Analysis</h3>
+                    <p class="text-gray-300">
+                        Detect broken links, analyze link structure, and identify redirect chains across your entire website.
+                    </p>
+                </div>
+
+                <!-- Feature 2 -->
+                <div class="glass rounded-3xl p-8 floating-card animate-slide-up" style="animation-delay: 0.1s;">
+                    <div class="w-16 h-16 bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl flex items-center justify-center mb-6">
+                        <i class="fas fa-hand-pointer text-2xl text-white"></i>
+                    </div>
+                    <h3 class="text-2xl font-bold text-white mb-4">Interactive Testing</h3>
+                    <p class="text-gray-300">
+                        Test all buttons, forms, and interactive elements to ensure they work correctly and provide feedback.
+                    </p>
+                </div>
+
+                <!-- Feature 3 -->
+                <div class="glass rounded-3xl p-8 floating-card animate-slide-up" style="animation-delay: 0.2s;">
+                    <div class="w-16 h-16 bg-gradient-to-r from-yellow-500 to-orange-600 rounded-2xl flex items-center justify-center mb-6">
+                        <i class="fas fa-tachometer-alt text-2xl text-white"></i>
+                    </div>
+                    <h3 class="text-2xl font-bold text-white mb-4">Performance Monitoring</h3>
+                    <p class="text-gray-300">
+                        Analyze page load times, First Contentful Paint, and overall performance metrics.
+                    </p>
+                </div>
+
+                <!-- Feature 4 -->
+                <div class="glass rounded-3xl p-8 floating-card animate-slide-up" style="animation-delay: 0.3s;">
+                    <div class="w-16 h-16 bg-gradient-to-r from-purple-500 to-pink-600 rounded-2xl flex items-center justify-center mb-6">
+                        <i class="fas fa-search text-2xl text-white"></i>
+                    </div>
+                    <h3 class="text-2xl font-bold text-white mb-4">SEO Analysis</h3>
+                    <p class="text-gray-300">
+                        Check meta tags, heading structure, image alt texts, and other SEO best practices.
+                    </p>
+                </div>
+
+                <!-- Feature 5 -->
+                <div class="glass rounded-3xl p-8 floating-card animate-slide-up" style="animation-delay: 0.4s;">
+                    <div class="w-16 h-16 bg-gradient-to-r from-indigo-500 to-blue-600 rounded-2xl flex items-center justify-center mb-6">
+                        <i class="fas fa-universal-access text-2xl text-white"></i>
+                    </div>
+                    <h3 class="text-2xl font-bold text-white mb-4">Accessibility Audit</h3>
+                    <p class="text-gray-300">
+                        Ensure your website meets accessibility standards and provides a good experience for all users.
+                    </p>
+                </div>
+
+                <!-- Feature 6 -->
+                <div class="glass rounded-3xl p-8 floating-card animate-slide-up" style="animation-delay: 0.5s;">
+                    <div class="w-16 h-16 bg-gradient-to-r from-cyan-500 to-teal-600 rounded-2xl flex items-center justify-center mb-6">
+                        <i class="fas fa-chart-line text-2xl text-white"></i>
+                    </div>
+                    <h3 class="text-2xl font-bold text-white mb-4">Real-time Reports</h3>
+                    <p class="text-gray-300">
+                        Get instant, detailed reports with charts, downloadable JSON/CSV exports, and actionable insights.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- How It Works Section -->
+        <section id="how-it-works" class="container mx-auto px-4 py-20">
+            <div class="text-center mb-16">
+                <h2 class="text-4xl font-bold mb-4 gradient-text">How It Works</h2>
+                <p class="text-xl text-gray-300 max-w-2xl mx-auto">
+                    Get started with WebScan Pro in just three simple steps.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <!-- Step 1 -->
+                <div class="text-center animate-slide-up">
+                    <div class="w-20 h-20 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-6 text-2xl font-bold text-white">
+                        1
+                    </div>
+                    <h3 class="text-2xl font-bold text-white mb-4">Connect Your Wallet</h3>
+                    <p class="text-gray-300">
+                        Securely connect your Web3 wallet to access the platform. No personal information required.
+                    </p>
+                </div>
+
+                <!-- Step 2 -->
+                <div class="text-center animate-slide-up" style="animation-delay: 0.2s;">
+                    <div class="w-20 h-20 bg-gradient-to-r from-green-500 to-emerald-600 rounded-full flex items-center justify-center mx-auto mb-6 text-2xl font-bold text-white">
+                        2
+                    </div>
+                    <h3 class="text-2xl font-bold text-white mb-4">Enter Website URL</h3>
+                    <p class="text-gray-300">
+                        Simply paste your website URL and choose your preferred scan depth and options.
+                    </p>
+                </div>
+
+                <!-- Step 3 -->
+                <div class="text-center animate-slide-up" style="animation-delay: 0.4s;">
+                    <div class="w-20 h-20 bg-gradient-to-r from-purple-500 to-pink-600 rounded-full flex items-center justify-center mx-auto mb-6 text-2xl font-bold text-white">
+                        3
+                    </div>
+                    <h3 class="text-2xl font-bold text-white mb-4">Get Detailed Report</h3>
+                    <p class="text-gray-300">
+                        Receive comprehensive analysis with actionable insights and downloadable reports.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Pricing Section -->
+        <section id="pricing" class="container mx-auto px-4 py-20 relative overflow-hidden">
+            <div class="text-center mb-16">
+                <h2 class="text-4xl font-bold mb-4 gradient-text">Choose Your Plan</h2>
+                <p class="text-xl text-gray-300 max-w-2xl mx-auto">
+                    Start free and upgrade as your needs grow. All plans include wallet-based authentication.
+                </p>
+            </div>
+
+            <!-- Diagonal Divider Background -->
+            <div class="absolute inset-0 pointer-events-none" style="transform: rotate(-15deg);">
+                <div class="absolute top-1/4 left-1/4 w-64 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" style="transform: rotate(45deg);"></div>
+                <div class="absolute bottom-1/4 right-1/4 w-64 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" style="transform: rotate(45deg);"></div>
+            </div>
+
+            <div class="relative z-10 grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-6xl mx-auto">
+                <!-- Free Plan - Bottom Left -->
+                <div class="pricing-card rounded-3xl p-8 text-center animate-slide-up transform rotate-3 hover:rotate-0 transition-transform duration-300" style="animation-delay: 0.1s;">
+                    <div class="mb-8">
+                        <h3 class="text-2xl font-bold text-white mb-2">Free</h3>
+                        <div class="text-4xl font-bold gradient-text mb-2">$0</div>
+                        <p class="text-gray-400">Perfect for getting started</p>
+                    </div>
+
+                    <ul class="text-left space-y-4 mb-8">
+                        <li class="flex items-center">
+                            <i class="fas fa-check text-green-400 mr-3"></i>
+                            <span class="text-gray-300">Up to 25 pages per scan</span>
+                        </li>
+                        <li class="flex items-center">
+                            <i class="fas fa-check text-green-400 mr-3"></i>
+                            <span class="text-gray-300">Basic link checking</span>
+                        </li>
+                        <li class="flex items-center">
+                            <i class="fas fa-check text-green-400 mr-3"></i>
+                            <span class="text-gray-300">Essential SEO checks</span>
+                        </li>
+                        <li class="flex items-center">
+                            <i class="fas fa-check text-green-400 mr-3"></i>
+                            <span class="text-gray-300">5 scans per month</span>
+                        </li>
+                        <li class="flex items-center">
+                            <i class="fas fa-times text-red-400 mr-3"></i>
+                            <span class="text-gray-500">Advanced features</span>
+                        </li>
+                    </ul>
+
+                    <button id="getStartedBtn" class="w-full py-3 px-6 bg-gradient-to-r from-gray-600 to-gray-700 text-white rounded-xl hover:from-gray-700 hover:to-gray-800 transition-all duration-300 font-semibold glow">
+                        Get Started Free
+                    </button>
+                </div>
+
+                <!-- Pro Plan - Top Right -->
+                <div class="pricing-card popular rounded-3xl p-8 text-center animate-slide-up transform -rotate-3 hover:rotate-0 transition-transform duration-300" style="animation-delay: 0.3s;">
+                    <div class="mb-8">
+                        <div class="inline-block px-4 py-2 bg-green-500/20 text-green-300 rounded-full text-sm font-semibold mb-4 animate-pulse">
+                            MOST POPULAR
+                        </div>
+                        <h3 class="text-2xl font-bold text-white mb-2">Pro</h3>
+                        <div class="text-4xl font-bold gradient-text mb-2">$9.99</div>
+                        <p class="text-gray-400">per month</p>
+                    </div>
+
+                    <ul class="text-left space-y-4 mb-8">
+                        <li class="flex items-center">
+                            <i class="fas fa-check text-green-400 mr-3"></i>
+                            <span class="text-gray-300">Up to 150 pages per scan</span>
+                        </li>
+                        <li class="flex items-center">
+                            <i class="fas fa-check text-green-400 mr-3"></i>
+                            <span class="text-gray-300">Complete link & button analysis</span>
+                        </li>
+                        <li class="flex items-center">
+                            <i class="fas fa-check text-green-400 mr-3"></i>
+                            <span class="text-gray-300">Performance monitoring</span>
+                        </li>
+                        <li class="flex items-center">
+                            <i class="fas fa-check text-green-400 mr-3"></i>
+                            <span class="text-gray-300">Full SEO & accessibility audit</span>
+                        </li>
+                        <li class="flex items-center">
+                            <i class="fas fa-check text-green-400 mr-3"></i>
+                            <span class="text-gray-300">Unlimited scans</span>
+                        </li>
+                        <li class="flex items-center">
+                            <i class="fas fa-check text-green-400 mr-3"></i>
+                            <span class="text-gray-300">Priority support</span>
+                        </li>
+                    </ul>
+
+                    <button id="subscribeProBtn" class="w-full py-3 px-6 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl hover:from-green-700 hover:to-emerald-700 transition-all duration-300 font-semibold glow">
+                        Subscribe Now
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="glass mt-20">
+            <div class="container mx-auto px-4 py-12">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
+                    <div class="md:col-span-2">
+                        <div class="flex items-center space-x-2 mb-4">
+                            <div class="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl flex items-center justify-center">
+                                <i class="fas fa-search text-white text-lg"></i>
+                            </div>
+                            <span class="text-xl font-bold gradient-text">WebScan Pro</span>
+                        </div>
+                        <p class="text-gray-400 mb-4">
+                            Professional website analysis tool powered by blockchain technology. Scan for issues, optimize performance, and improve user experience.
+                        </p>
+                        <div class="flex space-x-4">
+                            <a href="#" class="text-gray-400 hover:text-white transition-colors">
+                                <i class="fab fa-twitter text-xl"></i>
+                            </a>
+                            <a href="#" class="text-gray-400 hover:text-white transition-colors">
+                                <i class="fab fa-discord text-xl"></i>
+                            </a>
+                            <a href="#" class="text-gray-400 hover:text-white transition-colors">
+                                <i class="fab fa-github text-xl"></i>
+                            </a>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h4 class="text-white font-semibold mb-4">Product</h4>
+                        <ul class="space-y-2">
+                            <li><a href="#features" class="text-gray-400 hover:text-white transition-colors">Features</a></li>
+                            <li><a href="#pricing" class="text-gray-400 hover:text-white transition-colors">Pricing</a></li>
+                            <li><a href="#how-it-works" class="text-gray-400 hover:text-white transition-colors">How It Works</a></li>
+                            <li><a href="#" class="text-gray-400 hover:text-white transition-colors">API Docs</a></li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <h4 class="text-white font-semibold mb-4">Legal</h4>
+                        <ul class="space-y-2">
+                            <li><a href="#" class="text-gray-400 hover:text-white transition-colors">Privacy Policy</a></li>
+                            <li><a href="#" class="text-gray-400 hover:text-white transition-colors">Terms of Service</a></li>
+                            <li><a href="#" class="text-gray-400 hover:text-white transition-colors">Cookie Policy</a></li>
+                            <li><a href="#" class="text-gray-400 hover:text-white transition-colors">Contact</a></li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="border-t border-white/10 mt-8 pt-8 text-center">
+                    <p class="text-gray-400">
+                        © 2025 WebScan Pro. All rights reserved. Built with ❤️ for the Web3 community.
+                    </p>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Wallet Connection Modal -->
+    <div id="walletModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden flex items-center justify-center">
+        <div class="glass rounded-3xl p-8 max-w-md w-full mx-4">
+            <div class="text-center">
+                <div class="w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <i class="fas fa-wallet text-white text-2xl"></i>
+                </div>
+                <h3 class="text-2xl font-bold text-white mb-4">Connect Your Wallet</h3>
+                <p class="text-gray-400 mb-6">
+                    Connect your Web3 wallet to access WebScan Pro. Your wallet address will be used for authentication and subscription management.
+                </p>
+                <div class="space-y-3">
+                    <button id="connectMetaMask" class="w-full py-3 px-4 bg-orange-500/20 hover:bg-orange-500/30 text-orange-300 rounded-xl transition-all duration-300 flex items-center justify-center">
+                        <i class="fab fa-ethereum mr-3"></i>MetaMask
+                    </button>
+                    <button id="connectWalletConnect" class="w-full py-3 px-4 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 rounded-xl transition-all duration-300 flex items-center justify-center">
+                        <i class="fas fa-link mr-3"></i>WalletConnect
+                    </button>
+                    <button id="connectCoinbase" class="w-full py-3 px-4 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded-xl transition-all duration-300 flex items-center justify-center">
+                        <i class="fab fa-ethereum mr-3"></i>Coinbase Wallet
+                    </button>
+                </div>
+                <button id="closeWalletModal" class="mt-6 text-gray-400 hover:text-white transition-colors">
+                    <i class="fas fa-times"></i> Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="landing.js"></script>
+</body>
+</html>

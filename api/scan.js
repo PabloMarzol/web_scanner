@@ -64,7 +64,20 @@ export default async function handler(req, res) {
       progress: 0,
       url,
       startTime: new Date().toISOString(),
-      results: null
+      results: null,
+      pagesToCrawl: ['/'], // Track pages to crawl for resume functionality
+      visitedPages: new Set(), // Track visited pages
+      allIssues: { // Track all issues collected so far
+        brokenLinks: [],
+        brokenButtons: [],
+        authErrors: [],
+        missingResources: [],
+        reactWarnings: [],
+        jsErrors: [],
+        pageErrors: [],
+        workingLinks: [],
+        workingButtons: []
+      }
     };
     
     // Load existing scans and add new one
@@ -86,6 +99,94 @@ export default async function handler(req, res) {
     });
     
     return res.json({ scanId, status: 'started' });
+  }
+
+  // POST /api/scan/stop - Stop a scan
+  if (req.method === 'POST' && req.url?.includes('/stop')) {
+    const { scanId } = req.body;
+    
+    if (!scanId) {
+      return res.status(400).json({ error: 'scanId is required' });
+    }
+    
+    const activeScans = loadScans();
+    const scan = activeScans.get(scanId);
+    
+    if (!scan) {
+      return res.status(404).json({ error: 'Scan not found' });
+    }
+    
+    // Update scan status to stopped
+    scan.status = 'stopped';
+    scan.endTime = new Date().toISOString();
+    
+    // Generate partial report if we have any data
+    if (scan.visitedPages && scan.allIssues) {
+      const summary = {
+        totalPages: scan.visitedPages.size,
+        totalLinks: scan.allIssues.brokenLinks.length + scan.allIssues.workingLinks.length,
+        totalButtons: scan.allIssues.brokenButtons.length + scan.allIssues.workingButtons.length,
+        brokenLinksCount: scan.allIssues.brokenLinks.length,
+        brokenButtonsCount: scan.allIssues.brokenButtons.length,
+        authIssuesCount: scan.allIssues.authErrors.length,
+        missingResourcesCount: scan.allIssues.missingResources.length,
+        pagesWithErrors: scan.allIssues.pageErrors.length
+      };
+      
+      scan.results = {
+        summary,
+        issues: scan.allIssues,
+        pages: Array.from(scan.visitedPages)
+      };
+    }
+    
+    activeScans.set(scanId, scan);
+    saveScans(activeScans);
+    
+    return res.json({ scanId, status: 'stopped', message: 'Scan stopped successfully' });
+  }
+
+  // POST /api/scan/resume - Resume a stopped scan
+  if (req.method === 'POST' && req.url?.includes('/resume')) {
+    const { scanId } = req.body;
+    
+    if (!scanId) {
+      return res.status(400).json({ error: 'scanId is required' });
+    }
+    
+    const activeScans = loadScans();
+    const scan = activeScans.get(scanId);
+    
+    if (!scan) {
+      return res.status(404).json({ error: 'Scan not found' });
+    }
+    
+    if (scan.status !== 'stopped') {
+      return res.status(400).json({ error: 'Scan must be in stopped state to resume' });
+    }
+    
+    // Reset status and continue scanning
+    scan.status = 'running';
+    scan.progress = Math.min(90, (scan.visitedPages.size / Math.max(scan.visitedPages.size + scan.pagesToCrawl.length, 1)) * 10);
+    scan.endTime = null;
+    
+    activeScans.set(scanId, scan);
+    saveScans(activeScans);
+    
+    // Resume scanning in background
+    scanWebsite(scan.url, scanId, scan).catch(error => {
+      console.error('Scan resume error:', error);
+      const scans = loadScans();
+      const failedScan = scans.get(scanId);
+      if (failedScan) {
+        failedScan.status = 'error';
+        failedScan.error = error.message;
+        scans.set(scanId, failedScan);
+        saveScans(scans);
+      }
+    });
+    
+    return res.json({ scanId, status: 'resumed' });
   }
 
   // GET /api/scan?scanId=xxx - Get scan status 
@@ -117,20 +218,20 @@ export default async function handler(req, res) {
 }
 
 // Your EXACT scanWebsite function from server.js - modified to use file storage
-async function scanWebsite(baseUrl, scanId) {
+async function scanWebsite(baseUrl, scanId, existingScan = null) {
   console.log(`🚀 scanWebsite called with baseUrl: ${baseUrl}, scanId: ${scanId}`);
   
   // Load scan from file
   let activeScans = loadScans();
-  let scan = activeScans.get(scanId);
+  let scan = existingScan || activeScans.get(scanId);
   
   if (!scan) {
     console.log(`❌ Scan not found in activeScans for ID: ${scanId}`);
     return;
-  }
+ }
   
   // Add logs array to store real-time updates
-  scan.logs = [];
+ scan.logs = scan.logs || [];
   
   // Helper function to add logs and save state
   const addLog = (message, type = 'info') => {
@@ -213,8 +314,9 @@ async function scanWebsite(baseUrl, scanId) {
       addLog(`✅ Browser launched successfully`, 'success');
     }
 
-    const visitedPages = new Set();
-    const allIssues = {
+    // Use existing scan data or initialize new
+    let visitedPages = scan.visitedPages ? new Set(scan.visitedPages) : new Set();
+    let allIssues = scan.allIssues || {
       brokenLinks: [],
       brokenButtons: [],
       authErrors: [],
@@ -225,10 +327,9 @@ async function scanWebsite(baseUrl, scanId) {
       workingLinks: [],
       workingButtons: []
     };
-    
-    const pagesToCrawl = ['/'];
-    let processedPages = 0;
-    
+    let pagesToCrawl = scan.pagesToCrawl || ['/'];
+    let processedPages = visitedPages.size;
+
     // Update progress
     const updateProgress = () => {
       scan.progress = Math.min(90, (processedPages / Math.max(visitedPages.size + pagesToCrawl.length, 1)) * 100);
@@ -238,99 +339,145 @@ async function scanWebsite(baseUrl, scanId) {
       saveScans(activeScans);
     };
     
+    // Check if scan should be stopped
+    const shouldStop = () => {
+      const currentScan = activeScans.get(scanId);
+      return currentScan?.status === 'stopped';
+    };
+    
     // Simplified crawlPage function for brevity - you can expand this with your full logic
     async function crawlPage(pageUrl) {
-        if (visitedPages.has(pageUrl)) return;
-        visitedPages.add(pageUrl);
-        processedPages++;
-        updateProgress();
-        
-        const fullUrl = pageUrl.startsWith('http') ? pageUrl : baseUrl + pageUrl;
-        addLog(`📄 Scanning: ${fullUrl}`, 'info');
-        
-        let page;
-        try {
-            page = await browser.newPage();
-            await page.setViewport({ width: 1920, height: 1080 });
-            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
-            
-            const response = await page.goto(fullUrl, { 
-                timeout: 30000,
-                waitUntil: 'domcontentloaded'
-            });
-            
-            if (!response || response.status() >= 400) {
-                addLog(`❌ Page failed to load: ${fullUrl}`, 'error');
-                allIssues.pageErrors.push({
-                    url: fullUrl,
-                    status: response?.status() || 'No response',
-                    error: 'Page failed to load'
-                });
-                return;
-            }
-            
-            addLog(`✅ Page loaded successfully`, 'success');
-            
-            // Test links (simplified version)
-            const links = await page.evaluate((baseUrl) => {
-                const allLinks = Array.from(document.querySelectorAll('a[href]'));
-                return allLinks
-                    .map(link => link.getAttribute('href'))
-                    .filter(href => href && !href.startsWith('#') && !href.startsWith('mailto:'))
-                    .slice(0, 5); // Limit for demo
-            }, baseUrl);
-            
-            addLog(`🔗 Found ${links.length} links to test`, 'info');
-            
-            // Test each link
-            for (const link of links) {
-                try {
-                    const response = await fetch(link, { 
-                        method: 'HEAD',
-                        timeout: 5000
-                    });
-                    
-                    if (!response.ok) {
-                        allIssues.brokenLinks.push({
-                            page: fullUrl,
-                            link,
-                            status: response.status,
-                            error: response.statusText
-                        });
-                    } else {
-                        allIssues.workingLinks.push({ page: fullUrl, link });
-                    }
-                } catch (error) {
-                    allIssues.brokenLinks.push({
-                        page: fullUrl,
-                        link,
-                        status: 'ERROR',
-                        error: error.message
-                    });
-                }
-            }
-            
-        } catch (error) {
-            addLog(`❌ Error crawling ${fullUrl}: ${error.message}`, 'error');
-        } finally {
-            if (page) {
-                try {
-                    await page.close();
-                } catch (e) {
-                    // Ignore close errors
-                }
-            }
-        }
-        
-        addLog(`✅ Completed: ${fullUrl}`, 'success');
+      // Check if scan should be stopped before processing
+      if (shouldStop()) {
+        addLog(`🛑 Scan stopped by user`, 'info');
+        return;
+      }
+
+      if (visitedPages.has(pageUrl)) return;
+      visitedPages.add(pageUrl);
+      processedPages++;
+      updateProgress();
+      
+      const fullUrl = pageUrl.startsWith('http') ? pageUrl : baseUrl + pageUrl;
+      addLog(`📄 Scanning: ${fullUrl}`, 'info');
+      
+      let page;
+      try {
+          page = await browser.newPage();
+          await page.setViewport({ width: 1920, height: 1080 });
+          await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+          
+          const response = await page.goto(fullUrl, { 
+              timeout: 30000,
+              waitUntil: 'domcontentloaded'
+          });
+          
+          if (!response || response.status() >= 40) {
+              addLog(`❌ Page failed to load: ${fullUrl}`, 'error');
+              allIssues.pageErrors.push({
+                  url: fullUrl,
+                  status: response?.status() || 'No response',
+                  error: 'Page failed to load'
+              });
+              return;
+          }
+          
+          addLog(`✅ Page loaded successfully`, 'success');
+          
+          // Test links (simplified version)
+          const links = await page.evaluate((baseUrl) => {
+              const allLinks = Array.from(document.querySelectorAll('a[href]'));
+              return allLinks
+                  .map(link => link.getAttribute('href'))
+                  .filter(href => href && !href.startsWith('#') && !href.startsWith('mailto:'))
+                  .slice(0, 5); // Limit for demo
+          }, baseUrl);
+          
+          addLog(`🔗 Found ${links.length} links to test`, 'info');
+          
+          // Test each link
+          for (const link of links) {
+              try {
+                  const response = await fetch(link, { 
+                      method: 'HEAD',
+                      timeout: 5000
+                  });
+                  
+                  if (!response.ok) {
+                      allIssues.brokenLinks.push({
+                          page: fullUrl,
+                          link,
+                          status: response.status,
+                          error: response.statusText
+                      });
+                  } else {
+                      allIssues.workingLinks.push({ page: fullUrl, link });
+                  }
+              } catch (error) {
+                  allIssues.brokenLinks.push({
+                      page: fullUrl,
+                      link,
+                      status: 'ERROR',
+                      error: error.message
+                  });
+              }
+          }
+          
+      } catch (error) {
+          addLog(`❌ Error crawling ${fullUrl}: ${error.message}`, 'error');
+      } finally {
+          if (page) {
+              try {
+                  await page.close();
+              } catch (e) {
+                  // Ignore close errors
+              }
+          }
+      }
+      
+      addLog(`✅ Completed: ${fullUrl}`, 'success');
     }
     
     // Crawl pages (limit to 2 for demo)
     while (pagesToCrawl.length > 0 && visitedPages.size < 2) {
+      // Check if scan should be stopped before processing next page
+      if (shouldStop()) {
+        addLog(`🛑 Scan stopped by user during processing`, 'info');
+        scan.status = 'stopped';
+        scan.endTime = new Date().toISOString();
+        // Generate partial report
+        const summary = {
+          totalPages: visitedPages.size,
+          totalLinks: allIssues.brokenLinks.length + allIssues.workingLinks.length,
+          totalButtons: allIssues.brokenButtons.length + allIssues.workingButtons.length,
+          brokenLinksCount: allIssues.brokenLinks.length,
+          brokenButtonsCount: allIssues.brokenButtons.length,
+          authIssuesCount: allIssues.authErrors.length,
+          missingResourcesCount: allIssues.missingResources.length,
+          pagesWithErrors: allIssues.pageErrors.length
+        };
+        scan.results = {
+          summary,
+          issues: allIssues,
+          pages: Array.from(visitedPages)
+        };
+        scan.visitedPages = Array.from(visitedPages);
+        scan.allIssues = allIssues;
+        scan.pagesToCrawl = pagesToCrawl;
+        activeScans.set(scanId, scan);
+        saveScans(activeScans);
+        return;
+      }
+
       const currentUrl = pagesToCrawl.shift();
       await crawlPage(currentUrl);
     }
     
+    // Check if scan was stopped before completing
+    if (scan.status === 'stopped') {
+      return;
+    }
+
     // Generate summary
     const summary = {
       totalPages: visitedPages.size,
@@ -351,6 +498,9 @@ async function scanWebsite(baseUrl, scanId) {
       issues: allIssues,
       pages: Array.from(visitedPages)
     };
+    scan.visitedPages = Array.from(visitedPages);
+    scan.allIssues = allIssues;
+    scan.pagesToCrawl = pagesToCrawl;
     
     // Final save
     activeScans.set(scanId, scan);
