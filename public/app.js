@@ -130,20 +130,65 @@ class WebsiteTester {
                 }
             }
 
-            // Update scan limits display
+            // Update scan limits display with enhanced interactive counter
             const scanLimits = document.getElementById('scanLimits');
             if (scanLimits) {
                 const remaining = this.user.monthlyScanLimit - this.user.scansUsedThisMonth;
+                const usagePercentage = (this.user.scansUsedThisMonth / this.user.monthlyScanLimit) * 100;
+                
+                // Determine color based on usage percentage
+                let progressBarColor = 'from-blue-500 to-purple-500';
+                let counterColor = 'text-white';
+                
+                if (usagePercentage >= 90) {
+                    progressBarColor = 'from-red-500 to-orange-500';
+                    counterColor = 'text-red-400';
+                } else if (usagePercentage >= 75) {
+                    progressBarColor = 'from-orange-500 to-yellow-500';
+                    counterColor = 'text-orange-400';
+                } else if (usagePercentage >= 50) {
+                    progressBarColor = 'from-yellow-500 to-green-500';
+                    counterColor = 'text-yellow-400';
+                }
+
                 scanLimits.innerHTML = `
                     <div class="text-center">
-                        <p class="text-2xl font-bold text-white">${remaining}</p>
-                        <p class="text-sm text-gray-400">scans remaining</p>
-                        <div class="w-full bg-gray-700 rounded-full h-2 mt-2">
-                            <div class="bg-gradient-to-r from-blue-500 to-purple-500 h-2 rounded-full"
-                                 style="width: ${(this.user.scansUsedThisMonth / this.user.monthlyScanLimit) * 100}%"></div>
+                        <div class="relative">
+                            <p class="text-3xl font-bold ${counterColor} mb-1 scan-counter">${remaining}</p>
+                            <div class="absolute -top-2 -right-2">
+                                <i class="fas fa-sync-alt text-xs text-gray-400 animate-spin"></i>
+                            </div>
+                        <p class="text-sm text-gray-400 mb-2">scans remaining</p>
+                        <div class="w-full bg-gray-700 rounded-full h-3 mt-2 relative group">
+                            <div class="bg-gradient-to-r ${progressBarColor} h-3 rounded-full transition-all duration-500 ease-out"
+                                 style="width: ${usagePercentage}%"
+                                 data-remaining="${remaining}"
+                                 data-used="${this.user.scansUsedThisMonth}"
+                                 data-limit="${this.user.monthlyScanLimit}">
+                            </div>
+                            <div class="absolute inset-0 bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center text-xs text-white font-medium">
+                                ${Math.round(usagePercentage)}% used
+                            </div>
+                        <div class="mt-2 text-xs text-gray-500">
+                            ${this.user.scansUsedThisMonth} of ${this.user.monthlyScanLimit} used
                         </div>
                     </div>
                 `;
+
+                // Add hover effect for scan counter
+                const counterElement = scanLimits.querySelector('.scan-counter');
+                if (counterElement) {
+                    counterElement.addEventListener('mouseenter', () => {
+                        counterElement.style.transform = 'scale(1.1)';
+                        counterElement.style.transition = 'transform 0.2s ease';
+                    });
+                    counterElement.addEventListener('mouseleave', () => {
+                        counterElement.style.transform = 'scale(1)';
+                    });
+                }
+
+                // Check if user has reached scan limit and disable scan functionality
+                this.checkScanLimit();
             }
 
             // Disable scan options based on subscription
@@ -151,6 +196,93 @@ class WebsiteTester {
         } catch (error) {
             console.error('Error updating user interface:', error);
             // Continue without breaking the page
+        }
+    }
+
+    checkScanLimit() {
+        const { scansUsedThisMonth, monthlyScanLimit } = this.user;
+        
+        // Check if user has reached their scan limit
+        if (scansUsedThisMonth >= monthlyScanLimit) {
+            // Disable scan button and show upgrade prompt
+            const startScanBtn = document.getElementById('startScan');
+            const scanButtonContainer = document.getElementById('scanButtonContainer');
+            
+            if (startScanBtn) {
+                startScanBtn.disabled = true;
+                startScanBtn.classList.add('opacity-50', 'cursor-not-allowed', 'bg-gray-500');
+                startScanBtn.classList.remove('bg-gradient-to-r', 'from-blue-500', 'to-purple-500', 'hover:from-blue-600', 'hover:to-purple-600');
+                
+                // Change button text to indicate limit reached
+                startScanBtn.innerHTML = `
+                    <i class="fas fa-lock mr-2"></i>
+                    Limit Reached - Upgrade Required
+                `;
+                
+                // Add click handler to redirect to upgrade
+                startScanBtn.onclick = () => {
+                    this.showNotification('You have reached your monthly scan limit. Please upgrade to continue scanning.', 'info');
+                    // You could redirect to upgrade page here
+                };
+            }
+
+            // Also disable URL input
+            const urlInput = document.getElementById('websiteUrl');
+            if (urlInput) {
+                urlInput.disabled = true;
+                urlInput.classList.add('opacity-50', 'cursor-not-allowed');
+            }
+
+            // Show limit reached message
+            const scanMessage = document.createElement('div');
+            scanMessage.id = 'scanLimitMessage';
+            scanMessage.className = 'mt-4 p-4 bg-red-500/20 border border-red-500/30 rounded-lg text-center';
+            scanMessage.innerHTML = `
+                <i class="fas fa-exclamation-triangle text-red-400 mr-2"></i>
+                <span class="text-red-300">Monthly scan limit reached (${scansUsedThisMonth}/${monthlyScanLimit}). 
+                <button onclick="location.reload()" class="text-blue-400 hover:text-blue-300 underline ml-1">Refresh</button> 
+                or upgrade your plan.</span>
+            `;
+            
+            const scanForm = document.querySelector('.scan-form');
+            if (scanForm && !document.getElementById('scanLimitMessage')) {
+                scanForm.appendChild(scanMessage);
+            }
+
+            this.showNotification('You have reached your monthly scan limit. Please upgrade your plan to continue.', 'warning');
+        }
+    }
+
+    // Enhanced scan counter animation
+    animateScanCounter() {
+        const counterElement = document.querySelector('.scan-counter');
+        if (!counterElement) return;
+
+        const remaining = this.user.monthlyScanLimit - this.user.scansUsedThisMonth;
+        const currentCount = parseInt(counterElement.textContent) || 0;
+
+        if (currentCount !== remaining) {
+            // Animate the counter change
+            const duration = 1000;
+            const startTime = performance.now();
+            const startValue = currentCount;
+            const targetValue = remaining;
+
+            const animate = (currentTime) => {
+                const elapsed = currentTime - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+                const currentValue = Math.floor(startValue + (targetValue - startValue) * progress);
+
+                counterElement.textContent = currentValue;
+
+                if (progress < 1) {
+                    requestAnimationFrame(animate);
+                } else {
+                    counterElement.textContent = targetValue;
+                }
+            };
+
+            requestAnimationFrame(animate);
         }
     }
 
@@ -584,7 +716,8 @@ class WebsiteTester {
             const response = await fetch('/api/scan/stop', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('webscan_token')}`
                 },
                 body: JSON.stringify({ scanId: this.currentScanId })
             });
@@ -595,7 +728,7 @@ class WebsiteTester {
             }
 
             const result = await response.json();
-            this.showNotification('Scan stopped successfully. Partial report available.', 'info');
+            this.showNotification('Scan paused successfully. Partial results available.', 'info');
 
             // Clear the polling interval
             if (this.pollInterval) {
@@ -607,12 +740,16 @@ class WebsiteTester {
             document.getElementById('stopScan').classList.add('hidden');
             document.getElementById('resumeScan').classList.remove('hidden');
 
-            // Update UI to show stopped state
+            // Update UI to show paused state
             document.getElementById('progressStatus').innerHTML = 
-                `<i class="fas fa-pause text-yellow-400"></i> Scan stopped by user. Partial results available.`;
+                `<i class="fas fa-pause text-yellow-400"></i> Scan paused. Results saved. Click "Resume Scan" to continue.`;
 
             // Get the current scan state to display partial results
-            const scanResponse = await fetch(`/api/scan?scanId=${this.currentScanId}`);
+            const scanResponse = await fetch(`/api/scan?scanId=${this.currentScanId}`, {
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('webscan_token')}`
+                }
+            });
             const scanData = await scanResponse.json();
 
             if (scanData.results) {
@@ -621,7 +758,7 @@ class WebsiteTester {
             }
 
         } catch (error) {
-            this.showNotification('Error stopping scan: ' + error.message, 'error');
+            this.showNotification('Error pausing scan: ' + error.message, 'error');
         }
     }
 
@@ -635,7 +772,8 @@ class WebsiteTester {
             const response = await fetch('/api/scan/resume', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('webscan_token')}`
                 },
                 body: JSON.stringify({ scanId: this.currentScanId })
             });
@@ -700,7 +838,11 @@ class WebsiteTester {
     async pollForResults() {
         this.pollInterval = setInterval(async () => {
             try {
-                const response = await fetch(`/api/scan?scanId=${this.currentScanId}`);
+                const response = await fetch(`/api/scan?scanId=${this.currentScanId}`, {
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('webscan_token')}`
+                    }
+                });
                 const scan = await response.json();
                 
                 // Update progress with smooth animation
@@ -732,6 +874,14 @@ class WebsiteTester {
                     clearInterval(this.pollInterval);
                     this.showNotification('Scan failed: ' + scan.error, 'error');
                     document.getElementById('progressSection').classList.add('hidden');
+                } else if (scan.status === 'paused') {
+                    clearInterval(this.pollInterval);
+                    // Show paused state
+                    document.getElementById('progressStatus').innerHTML = 
+                        `<i class="fas fa-pause text-yellow-400"></i> Scan paused. Results saved. Click "Resume Scan" to continue.`;
+                    // Show resume button and hide stop button
+                    document.getElementById('stopScan').classList.add('hidden');
+                    document.getElementById('resumeScan').classList.remove('hidden');
                 }
                 
             } catch (error) {
