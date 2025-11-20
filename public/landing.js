@@ -1,550 +1,400 @@
-// Landing page JavaScript for WebScan Pro
 class LandingPage {
     constructor() {
-        this.initEventListeners();
-        this.initSmoothScrolling();
-        this.initPricingScroll();
-        this.checkWalletConnection();
+        this.init();
+        this.setupScrollEffects();
     }
 
-    initEventListeners() {
-        // Connect wallet button
-        const connectWalletBtn = document.getElementById('connectWallet');
-        if (connectWalletBtn) {
-            connectWalletBtn.addEventListener('click', () => this.showWalletModal());
+    init() {
+        // UI Elements
+        this.connectWalletBtn = document.getElementById('connectWallet');
+        this.heroStartBtn = document.getElementById('heroStartBtn');
+        this.heroPricingBtn = document.getElementById('heroPricingBtn');
+        this.walletModal = document.getElementById('walletModal');
+        this.closeWalletModalBtn = document.getElementById('closeWalletModal');
+        this.connectMetaMaskBtn = document.getElementById('connectMetaMask');
+        this.connectWalletConnectBtn = document.getElementById('connectWalletConnect');
+        this.subscribeBtns = document.querySelectorAll('.subscribe-btn');
+
+        // Event Listeners
+        if (this.connectWalletBtn) {
+            this.connectWalletBtn.addEventListener('click', () => this.openWalletModal());
         }
 
-        // Get started buttons (both hero and pricing section)
-        const getStartedHeroBtn = document.getElementById('getStartedHeroBtn');
-        if (getStartedHeroBtn) {
-            getStartedHeroBtn.addEventListener('click', () => this.handleGetStarted());
+        if (this.heroStartBtn) {
+            this.heroStartBtn.addEventListener('click', () => this.handleStartScanning());
         }
 
-        const getStartedPricingBtn = document.getElementById('getStartedBtn');
-        if (getStartedPricingBtn) {
-            getStartedPricingBtn.addEventListener('click', () => this.handleGetStarted());
-        }
-
-        // View pricing button
-        const viewPricingBtn = document.getElementById('viewPricingBtn');
-        if (viewPricingBtn) {
-            viewPricingBtn.addEventListener('click', () => this.scrollToPricing());
-        }
-
-        // Subscribe buttons
-        const subscribeProBtn = document.getElementById('subscribeProBtn');
-        if (subscribeProBtn) {
-            subscribeProBtn.addEventListener('click', () => this.handleSubscribe('pro'));
-        }
-
-        // Wallet modal buttons
-        const closeWalletModalBtn = document.getElementById('closeWalletModal');
-        if (closeWalletModalBtn) {
-            closeWalletModalBtn.addEventListener('click', () => this.hideWalletModal());
-        }
-
-        const connectMetaMaskBtn = document.getElementById('connectMetaMask');
-        if (connectMetaMaskBtn) {
-            connectMetaMaskBtn.addEventListener('click', () => this.connectMetaMask());
-        }
-
-        const connectWalletConnectBtn = document.getElementById('connectWalletConnect');
-        if (connectWalletConnectBtn) {
-            connectWalletConnectBtn.addEventListener('click', () => this.connectWalletConnect());
-        }
-
-        const connectCoinbaseBtn = document.getElementById('connectCoinbase');
-        if (connectCoinbaseBtn) {
-            connectCoinbaseBtn.addEventListener('click', () => this.connectCoinbase());
-        }
-
-        // Close modal on outside click
-        const walletModal = document.getElementById('walletModal');
-        if (walletModal) {
-            walletModal.addEventListener('click', (e) => {
-                if (e.target === walletModal) {
-                    this.hideWalletModal();
-                }
-            });
-        }
-    }
-
-    initSmoothScrolling() {
-        // Smooth scrolling for navigation links
-        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-            anchor.addEventListener('click', (e) => {
-                e.preventDefault();
-                const target = document.querySelector(anchor.getAttribute('href'));
-                if (target) {
-                    target.scrollIntoView({
-                        behavior: 'smooth',
-                        block: 'start'
-                    });
-                }
-            });
-        });
-    }
-
-    initPricingScroll() {
-        // Auto-scroll to pricing when "View Pricing" is clicked
-        const viewPricingBtn = document.getElementById('viewPricingBtn');
-        if (viewPricingBtn) {
-            viewPricingBtn.addEventListener('click', () => {
+        if (this.heroPricingBtn) {
+            this.heroPricingBtn.addEventListener('click', () => {
                 const pricingSection = document.getElementById('pricing');
                 if (pricingSection) {
-                    pricingSection.scrollIntoView({
-                        behavior: 'smooth',
-                        block: 'start'
-                    });
+                    pricingSection.scrollIntoView({ behavior: 'smooth' });
                 }
             });
         }
+
+        if (this.closeWalletModalBtn) {
+            this.closeWalletModalBtn.addEventListener('click', () => this.closeWalletModal());
+        }
+
+        if (this.walletModal) {
+            this.walletModal.addEventListener('click', (e) => {
+                if (e.target === this.walletModal) this.closeWalletModal();
+            });
+        }
+
+        if (this.connectMetaMaskBtn) {
+            this.connectMetaMaskBtn.addEventListener('click', () => this.connectMetaMask());
+        }
+
+        if (this.connectWalletConnectBtn) {
+            this.connectWalletConnectBtn.addEventListener('click', () => {
+                alert('WalletConnect support coming soon!');
+            });
+        }
+
+        this.subscribeBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => this.handleSubscription(e));
+        });
+
+        // Check for existing connection
+        this.checkWalletConnection();
+        this.updateScanCounter();
     }
 
-    showWalletModal() {
-        const modal = document.getElementById('walletModal');
-        if (modal) {
-            modal.classList.remove('hidden');
-            document.body.style.overflow = 'hidden';
+    setupScrollEffects() {
+        // Navbar scroll effect
+        window.addEventListener('scroll', () => {
+            const nav = document.querySelector('nav');
+            if (nav) {
+                if (window.scrollY > 50) {
+                    nav.classList.add('bg-black/90', 'shadow-lg');
+                    nav.classList.remove('bg-black/80');
+                } else {
+                    nav.classList.remove('bg-black/90', 'shadow-lg');
+                    nav.classList.add('bg-black/80');
+                }
+            }
+        });
+
+        // Intersection Observer for Showcase Items
+        const observerOptions = {
+            threshold: 0.2,
+            rootMargin: '0px'
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.remove('opacity-0', 'translate-y-20');
+                    entry.target.classList.add('opacity-100', 'translate-y-0');
+                }
+            });
+        }, observerOptions);
+
+        document.querySelectorAll('.showcase-item').forEach(item => {
+            observer.observe(item);
+        });
+
+        // Observer for Scan Counter
+        const counterObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.remove('translate-y-32', 'hidden');
+                    entry.target.classList.add('translate-y-0');
+                }
+            });
+        }, { threshold: 0.1 });
+
+        const scanCounter = document.getElementById('scanCounter');
+        if (scanCounter) {
+            // Show counter after a slight delay or when scrolling down
+            setTimeout(() => {
+                scanCounter.classList.remove('hidden');
+                requestAnimationFrame(() => {
+                    scanCounter.classList.remove('translate-y-32');
+                });
+            }, 2000);
         }
     }
 
-    hideWalletModal() {
-        const modal = document.getElementById('walletModal');
-        if (modal) {
-            modal.classList.add('hidden');
-            document.body.style.overflow = 'auto';
-        }
-    }
+    async updateScanCounter() {
+        const scanCounter = document.getElementById('scanCounter');
+        const scanCountEl = document.getElementById('scanCount');
+        const scanLabelEl = document.getElementById('scanLabel');
+        const progressRing = document.getElementById('scanProgressRing');
 
-    handleGetStarted() {
-        // Check if user is already authenticated
+        if (!scanCounter || !scanCountEl || !scanLabelEl || !progressRing) return;
+
         const token = localStorage.getItem('webscan_token');
+
         if (token) {
-            // Verify subscription status before redirecting
-            const subscriptionTier = this.getSubscriptionTierSync(token);
-            
-            if (subscriptionTier === 'free' || subscriptionTier === 'trial') {
-                // Still on free/trial plan - show wallet connection for potential upgrade
-                this.showWalletModal();
-            } else {
-                // Already subscribed to Pro - redirect to app
-                window.location.href = '/app';
+            try {
+                const response = await fetch('/api/user/subscription', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const { scansUsed, limit, tier } = data;
+
+                    // Calculate remaining
+                    let remaining = limit - scansUsed;
+                    if (remaining < 0) remaining = 0;
+
+                    // Update UI
+                    if (tier === 'pro' || tier === 'epic') {
+                        scanCountEl.textContent = '∞';
+                        scanLabelEl.textContent = 'Unlimited';
+                        scanLabelEl.className = 'text-sm font-medium text-purple-400';
+                        progressRing.style.strokeDashoffset = '0'; // Full circle
+                        progressRing.classList.remove('text-blue-500');
+                        progressRing.classList.add('text-purple-500');
+                    } else {
+                        scanCountEl.textContent = remaining;
+                        scanLabelEl.textContent = `${remaining} Left`;
+
+                        // Calculate progress circle
+                        // Circumference is 2 * PI * 20 ≈ 125.6
+                        const circumference = 125.6;
+                        const offset = circumference - ((remaining / 5) * circumference);
+                        progressRing.style.strokeDashoffset = offset;
+                    }
+                }
+            } catch (error) {
+                console.error('Error fetching scan count:', error);
             }
         } else {
-            // For free users, show wallet connection modal
-            this.showWalletModal();
+            // Default for non-logged in users
+            scanCountEl.textContent = '5';
+            scanLabelEl.textContent = 'Free Scans';
+            progressRing.style.strokeDashoffset = '0';
         }
     }
 
-    // Synchronous helper method to get user's subscription tier from stored data
-    getSubscriptionTierSync(token) {
-        try {
-            // Check if we have cached subscription info in localStorage
-            const cachedData = localStorage.getItem('user_subscription_cache');
-            if (cachedData) {
-                const cache = JSON.parse(cachedData);
-                if (cache.token === token && cache.expires > Date.now()) {
-                    return cache.tier;
-                }
-            }
-            return 'free'; // Default to free if no cache or expired
-        } catch (error) {
-            console.error('Subscription cache error:', error);
-            return 'free';
+    openWalletModal() {
+        if (this.walletModal) {
+            this.walletModal.classList.remove('hidden');
+            setTimeout(() => {
+                this.walletModal.classList.remove('opacity-0');
+            }, 10);
         }
     }
 
-    scrollToPricing() {
-        const pricingSection = document.getElementById('pricing');
-        if (pricingSection) {
-            pricingSection.scrollIntoView({
-                behavior: 'smooth',
-                block: 'start'
-            });
+    closeWalletModal() {
+        if (this.walletModal) {
+            this.walletModal.classList.add('opacity-0');
+            setTimeout(() => {
+                this.walletModal.classList.add('hidden');
+            }, 300);
         }
     }
 
-    async handleSubscribe(plan) {
-        // Check if user is already authenticated
-        const token = localStorage.getItem('webscan_token');
-        if (token) {
-            // Verify subscription status before redirecting
-            const subscriptionTier = await this.getSubscriptionTier(token);
-            
-            if (subscriptionTier === 'free' || subscriptionTier === 'trial') {
-                // Still on free/trial plan - show payment flow
-                this.showWalletModal();
-                this.pendingSubscription = plan;
-            } else {
-                // Already subscribed to Pro - redirect to app
-                window.location.href = '/app';
-            }
+    async handleStartScanning() {
+        const isConnected = await this.checkWalletConnection(false);
+        if (isConnected) {
+            window.location.href = '/app';
         } else {
-            // Not authenticated - show wallet modal
-            this.showWalletModal();
-
-            // Store the intended plan for after wallet connection
-            this.pendingSubscription = plan;
-        }
-    }
-
-    // Helper method to get user's subscription tier
-    async getSubscriptionTier(token) {
-        try {
-            const response = await fetch('/api/auth/verify-token', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
-
-            if (response.ok) {
-                const data = await response.json();
-                return data.user.subscriptionTier;
-            }
-            return 'free'; // Default to free if verification fails
-        } catch (error) {
-            console.error('Subscription check error:', error);
-            return 'free';
+            this.openWalletModal();
         }
     }
 
     async connectMetaMask() {
-        try {
-            if (typeof window.ethereum === 'undefined') {
-                this.showNotification('MetaMask is not installed. Please install MetaMask and try again.', 'error');
-                return;
-            }
-
-            // Request account access
-            const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-            const account = accounts[0];
-
-            this.showNotification('MetaMask connected successfully!', 'success');
-            this.hideWalletModal();
-
-            // Proceed with authentication
-            await this.authenticateWithWallet(account, 'metamask');
-
-        } catch (error) {
-            console.error('MetaMask connection error:', error);
-            this.showNotification('Failed to connect MetaMask. Please try again.', 'error');
-        }
-    }
-
-    async connectWalletConnect() {
-        try {
-            this.showNotification('WalletConnect integration coming soon!', 'info');
-            // TODO: Implement WalletConnect integration
-        } catch (error) {
-            console.error('WalletConnect error:', error);
-            this.showNotification('Failed to connect with WalletConnect.', 'error');
-        }
-    }
-
-    async connectCoinbase() {
-        try {
-            this.showNotification('Coinbase Wallet integration coming soon!', 'info');
-            // TODO: Implement Coinbase Wallet integration
-        } catch (error) {
-            console.error('Coinbase Wallet error:', error);
-            this.showNotification('Failed to connect Coinbase Wallet.', 'error');
-        }
-    }
-
-    async authenticateWithWallet(walletAddress, walletType) {
-        try {
-            // Step 1: Get nonce from server
-            const nonceResponse = await fetch('/api/auth/nonce', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ walletAddress })
-            });
-
-            if (!nonceResponse.ok) {
-                throw new Error('Failed to get authentication nonce');
-            }
-
-            const { nonce } = await nonceResponse.json();
-
-            // Step 2: Sign the nonce with the wallet
-            const message = `WebScan Pro Authentication\n\nWallet: ${walletAddress}\nNonce: ${nonce}\n\nSign this message to authenticate with WebScan Pro.`;
-            const signature = await this.signMessage(walletAddress, message);
-
-            // Step 3: Verify signature with server
-            const verifyResponse = await fetch('/api/auth/verify', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    walletAddress,
-                    signature,
-                    message,
-                    walletType
-                })
-            });
-
-            if (!verifyResponse.ok) {
-                throw new Error('Authentication failed');
-            }
-
-            const authResult = await verifyResponse.json();
-
-            // Store JWT token
-            localStorage.setItem('webscan_token', authResult.token);
-
-            // Cache the subscription tier for synchronous access
-            this.cacheSubscriptionTier(authResult.token, authResult.user.subscriptionTier);
-
-            // Update UI to show connected wallet
-            this.updateWalletDisplay(walletAddress, authResult.user.subscriptionTier);
-
-            this.showNotification('Authentication successful!', 'success');
-
-            // Handle subscription or redirect after a brief delay
-            setTimeout(() => {
-                if (this.pendingSubscription) {
-                    this.handlePayment(this.pendingSubscription, walletAddress);
-                } else {
-                    this.showNotification('Click your wallet address to access the app!', 'info');
-                }
-            }, 1000);
-
-        } catch (error) {
-            console.error('Authentication error:', error);
-            this.showNotification('Authentication failed. Please try again.', 'error');
-        }
-    }
-
-    async signMessage(walletAddress, message) {
         if (typeof window.ethereum !== 'undefined') {
             try {
-                const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-                if (accounts[0] !== walletAddress) {
-                    throw new Error('Wallet address mismatch');
-                }
-
-                const signature = await window.ethereum.request({
-                    method: 'personal_sign',
-                    params: [message, walletAddress],
-                });
-
-                return signature;
+                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                const account = accounts[0];
+                await this.authenticateWithWallet(account);
             } catch (error) {
-                throw new Error('Failed to sign message: ' + error.message);
+                console.error('User denied account access', error);
+                alert('Failed to connect wallet. Please try again.');
             }
         } else {
-            throw new Error('No Ethereum provider found');
+            window.open('https://metamask.io/download.html', '_blank');
         }
     }
 
-    async handlePayment(plan, walletAddress) {
+    async authenticateWithWallet(address) {
         try {
-            const planDetails = {
-                pro: { amount: 9.99, currency: 'USD' }
-            };
-
-            const details = planDetails[plan];
-            if (!details) {
-                throw new Error('Invalid plan selected');
-            }
-
-            // Create payment with NOWPayments
-            const paymentResponse = await fetch('/api/create-payment', {
+            // 1. Get nonce
+            const nonceResponse = await fetch('/api/auth/nonce', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('webscan_token')}`
-                },
-                body: JSON.stringify({
-                    plan,
-                    amount: details.amount,
-                    currency: details.currency,
-                    walletAddress
-                })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ address })
+            });
+            const { nonce } = await nonceResponse.json();
+
+            // 2. Sign nonce
+            const message = `Sign this message to verify your ownership of the wallet address: ${address}\nNonce: ${nonce}`;
+            const signature = await window.ethereum.request({
+                method: 'personal_sign',
+                params: [message, address]
             });
 
-            if (!paymentResponse.ok) {
-                throw new Error('Failed to create payment');
-            }
-
-            const paymentData = await paymentResponse.json();
-
-            // Redirect to NOWPayments payment URL
-            window.location.href = paymentData.paymentUrl;
-
-        } catch (error) {
-            console.error('Payment creation error:', error);
-            this.showNotification('Failed to create payment. Please try again.', 'error');
-        }
-    }
-
-    checkWalletConnection() {
-        // Check if user is already authenticated
-        const token = localStorage.getItem('webscan_token');
-        if (token) {
-            // Verify token with server
-            this.verifyTokenAndUpdateUI(token);
-        }
-    }
-
-    async verifyTokenAndUpdateUI(token) {
-        try {
-            const response = await fetch('/api/auth/verify-token', {
+            // 3. Verify signature
+            const authResponse = await fetch('/api/auth/verify', {
                 method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ address, signature })
+            });
+
+            if (authResponse.ok) {
+                const data = await authResponse.json();
+                localStorage.setItem('webscan_token', data.token);
+                localStorage.setItem('walletAddress', address);
+
+                // Check subscription and redirect
+                await this.checkSubscriptionAndRedirect(address);
+            } else {
+                throw new Error('Authentication failed');
+            }
+        } catch (error) {
+            console.error('Auth error:', error);
+            alert('Authentication failed. Please try again.');
+        }
+    }
+
+    async checkSubscriptionAndRedirect(address) {
+        try {
+            const token = localStorage.getItem('webscan_token');
+            const response = await fetch('/api/user/subscription', {
+                headers: { 'Authorization': `Bearer ${token}` }
             });
 
             if (response.ok) {
                 const data = await response.json();
-                // Cache the subscription tier for synchronous access
-                this.cacheSubscriptionTier(token, data.user.subscriptionTier);
-                this.updateWalletDisplay(data.user.walletAddress, data.user.subscriptionTier);
+                // Store subscription status
+                localStorage.setItem('subscriptionTier', data.tier);
+
+                // Redirect logic
+                if (data.tier === 'pro' || data.tier === 'business' || data.tier === 'enterprise') {
+                    window.location.href = '/app?mode=pro';
+                } else {
+                    window.location.href = '/app';
+                }
             } else {
-                // Token is invalid, remove it and cache
-                localStorage.removeItem('webscan_token');
-                localStorage.removeItem('user_subscription_cache');
+                window.location.href = '/app';
             }
         } catch (error) {
-            console.error('Token verification error:', error);
-            localStorage.removeItem('webscan_token');
-            localStorage.removeItem('user_subscription_cache');
+            console.error('Error checking subscription:', error);
+            window.location.href = '/app';
         }
     }
 
-    // Cache subscription tier for synchronous access
-    cacheSubscriptionTier(token, tier) {
-        const cache = {
-            token: token,
-            tier: tier,
-            expires: Date.now() + (5 * 60 * 100) // Cache for 5 minutes
-        };
-        localStorage.setItem('user_subscription_cache', JSON.stringify(cache));
+    async checkWalletConnection(updateUI = true) {
+        if (typeof window.ethereum !== 'undefined') {
+            try {
+                const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+                if (accounts.length > 0) {
+                    if (updateUI) {
+                        this.updateUIForConnectedState(accounts[0]);
+                    }
+                    return true;
+                }
+            } catch (error) {
+                console.error('Error checking wallet connection:', error);
+            }
+        }
+        return false;
     }
 
-    updateWalletDisplay(walletAddress, subscriptionTier) {
-        const connectWalletBtn = document.getElementById('connectWallet');
-        if (connectWalletBtn && walletAddress) {
-            // Update button to show wallet address with disconnect option
-            const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`;
-            connectWalletBtn.innerHTML = `
-                <i class="fas fa-wallet mr-2"></i>
-                <span class="text-green-400">${shortAddress}</span>
-                <span class="ml-2 px-2 py-1 bg-${subscriptionTier === 'pro' ? 'green' : 'gray'}-500/20 text-${subscriptionTier === 'pro' ? 'green' : 'gray'}-300 rounded text-xs">
-                    ${subscriptionTier.toUpperCase()}
-                </span>
-                <button id="disconnectBtn" class="ml-2 px-2 py-1 bg-red-500/20 hover:bg-red-500/30 text-red-300 rounded text-xs transition-colors" title="Disconnect Wallet">
-                    <i class="fas fa-sign-out-alt"></i>
-                </button>
-            `;
+    updateUIForConnectedState(address) {
+        const shortAddress = `${address.substring(0, 6)}...${address.substring(38)}`;
+        if (this.connectWalletBtn) {
+            this.connectWalletBtn.innerHTML = `<i class="fas fa-wallet"></i> ${shortAddress} <i class="fas fa-sign-out-alt ml-2"></i>`;
+            this.connectWalletBtn.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+            this.connectWalletBtn.classList.add('bg-gray-700', 'hover:bg-gray-600');
 
-            // Add click handler to go to app
-            connectWalletBtn.onclick = (e) => {
-                // Only go to app if not clicking the disconnect button
-                if (!e.target.closest('#disconnectBtn')) {
-                    window.location.href = '/app';
-                }
-            };
+            // Remove old event listeners to prevent multiple bindings
+            const newBtn = this.connectWalletBtn.cloneNode(true);
+            this.connectWalletBtn.parentNode.replaceChild(newBtn, this.connectWalletBtn);
+            this.connectWalletBtn = newBtn;
 
-            // Add disconnect button handler
-            const disconnectBtn = document.getElementById('disconnectBtn');
-            if (disconnectBtn) {
-                disconnectBtn.onclick = (e) => {
-                    e.stopPropagation();
+            this.connectWalletBtn.addEventListener('click', () => {
+                if (confirm('Disconnect wallet?')) {
                     this.disconnectWallet();
-                };
-            }
-
-            // Keep right-click menu for additional options
-            connectWalletBtn.addEventListener('contextmenu', (e) => {
-                e.preventDefault();
-                this.showDisconnectMenu(e);
+                }
             });
         }
     }
 
-    showDisconnectMenu(event) {
-        // Create a simple disconnect menu
-        const menu = document.createElement('div');
-        menu.className = 'fixed z-50 glass rounded-xl p-2 min-w-32';
-        menu.style.left = `${event.clientX}px`;
-        menu.style.top = `${event.clientY}px`;
-
-        menu.innerHTML = `
-            <button id="disconnectWallet" class="w-full text-left px-3 py-2 text-white hover:bg-white/10 rounded transition-colors">
-                <i class="fas fa-sign-out-alt mr-2"></i>Disconnect
-            </button>
-        `;
-
-        document.body.appendChild(menu);
-
-        // Handle disconnect
-        const disconnectBtn = document.getElementById('disconnectWallet');
-        disconnectBtn.addEventListener('click', () => {
-            this.disconnectWallet();
-            document.body.removeChild(menu);
-        });
-
-        // Remove menu on outside click
-        const removeMenu = (e) => {
-            if (!menu.contains(e.target)) {
-                document.body.removeChild(menu);
-                document.removeEventListener('click', removeMenu);
-            }
-        };
-
-        setTimeout(() => {
-            document.addEventListener('click', removeMenu);
-        }, 100);
-    }
-
     disconnectWallet() {
         localStorage.removeItem('webscan_token');
-        localStorage.removeItem('user_subscription_cache');
-        location.reload(); // Refresh to show connect button again
+        localStorage.removeItem('walletAddress');
+        localStorage.removeItem('subscriptionTier');
+
+        // Reset UI
+        if (this.connectWalletBtn) {
+            this.connectWalletBtn.innerHTML = 'Connect Wallet';
+            this.connectWalletBtn.classList.remove('bg-gray-700', 'hover:bg-gray-600');
+            this.connectWalletBtn.classList.add('bg-blue-600', 'hover:bg-blue-700');
+
+            // Rebind connect listener
+            const newBtn = this.connectWalletBtn.cloneNode(true);
+            this.connectWalletBtn.parentNode.replaceChild(newBtn, this.connectWalletBtn);
+            this.connectWalletBtn = newBtn;
+
+            this.connectWalletBtn.addEventListener('click', () => this.openWalletModal());
+        }
+
+        alert('Wallet disconnected.');
     }
 
-    showNotification(message, type = 'info') {
-        const notification = document.createElement('div');
-        notification.className = `fixed top-4 right-4 z-50 glass rounded-2xl p-4 text-white max-w-sm transition-all duration-500 transform translate-x-full`;
+    async handleSubscription(e) {
+        const btn = e.currentTarget;
+        const plan = btn.dataset.plan;
 
-        const icon = type === 'error' ? 'fas fa-exclamation-circle text-red-400' :
-                    type === 'success' ? 'fas fa-check-circle text-green-400' :
-                    'fas fa-info-circle text-blue-400';
+        const isConnected = await this.checkWalletConnection(false);
+        if (!isConnected) {
+            this.openWalletModal();
+            return;
+        }
 
-        notification.innerHTML = `
-            <div class="flex items-center gap-3">
-                <i class="${icon}"></i>
-                <span>${message}</span>
-            </div>
-        `;
+        // Proceed to payment
+        this.initiatePayment(plan);
+    }
 
-        document.body.appendChild(notification);
+    async initiatePayment(plan) {
+        try {
+            const token = localStorage.getItem('webscan_token');
+            if (!token) {
+                alert('Please connect your wallet first.');
+                return;
+            }
 
-        // Animate in
-        setTimeout(() => {
-            notification.style.transform = 'translateX(0)';
-        }, 100);
+            const response = await fetch('/api/create-payment', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    plan: plan,
+                    price_amount: 9.99, // Dynamic based on plan in real app
+                    price_currency: 'usd',
+                    pay_currency: 'btc' // Default or user selection
+                })
+            });
 
-        // Animate out and remove
-        setTimeout(() => {
-            notification.style.transform = 'translateX(100%)';
-            setTimeout(() => {
-                if (document.body.contains(notification)) {
-                    document.body.removeChild(notification);
+            if (response.ok) {
+                const data = await response.json();
+                if (data.invoice_url) {
+                    window.location.href = data.invoice_url;
+                } else {
+                    alert('Failed to create payment invoice.');
                 }
-            }, 500);
-        }, 4000);
+            } else {
+                const error = await response.json();
+                alert(`Payment creation failed: ${error.message}`);
+            }
+        } catch (error) {
+            console.error('Payment error:', error);
+            alert('An error occurred while initiating payment.');
+        }
     }
 }
 
-// Initialize the landing page when DOM is loaded
+// Initialize
 document.addEventListener('DOMContentLoaded', () => {
     new LandingPage();
 });
